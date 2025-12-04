@@ -1,0 +1,17 @@
+# Ignore Python compiled files
+__pycache__/
+*.pyc
+
+# Ignore Virtual Env
+venv/
+env/
+
+# Ignore Node Modules (Frontend)
+node_modules/
+dist/
+
+# MacOS clutter
+.DS_Store
+
+# Optional: Ignore dataset if it gets too big (but for now, keep it)
+# dataset/
