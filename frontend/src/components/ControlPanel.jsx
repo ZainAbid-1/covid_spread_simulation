@@ -40,7 +40,7 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
           <input
             type="range"
             min="1"
-            max="14"
+            max="150"
             step="1"
             value={params.gamma_days}
             onChange={(e) => handleChange('gamma_days', e.target.value)}
@@ -49,7 +49,7 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
           <div className="flex justify-between text-xs text-slate-400 mt-1">
             <span>1</span>
             <span className="font-bold text-cyan-400">{params.gamma_days} days</span>
-            <span>14</span>
+            <span>150</span>
           </div>
           <p className="text-xs text-slate-500 mt-2">
             Days until an infected person recovers
@@ -63,7 +63,7 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
           <input
             type="range"
             min="1"
-            max="50"
+            max="3000"
             step="1"
             value={params.start_nodes}
             onChange={(e) => handleChange('start_nodes', e.target.value)}
@@ -72,7 +72,7 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
           <div className="flex justify-between text-xs text-slate-400 mt-1">
             <span>1</span>
             <span className="font-bold text-red-400">{params.start_nodes} nodes</span>
-            <span>50</span>
+            <span>3000</span>
           </div>
           <p className="text-xs text-slate-500 mt-2">
             Number of initially infected individuals

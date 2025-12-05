@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
+import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 
 function NetworkGraph({ graphData, nodeStates }) {
   const graphRef = useRef()
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
+  const animationTime = useRef(0)
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -48,6 +50,35 @@ function NetworkGraph({ graphData, nodeStates }) {
     return state === 'infected' ? 5 : 3.5
   }
 
+  useEffect(() => {
+    const animate = () => {
+      animationTime.current += 1
+      requestAnimationFrame(animate)
+    }
+    const animationId = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(animationId)
+  }, [])
+
+  const handleZoomIn = () => {
+    if (graphRef.current) {
+      const currentZoom = graphRef.current.zoom()
+      graphRef.current.zoom(currentZoom * 1.3, 400)
+    }
+  }
+
+  const handleZoomOut = () => {
+    if (graphRef.current) {
+      const currentZoom = graphRef.current.zoom()
+      graphRef.current.zoom(currentZoom / 1.3, 400)
+    }
+  }
+
+  const handleZoomToFit = () => {
+    if (graphRef.current) {
+      graphRef.current.zoomToFit(400, 80)
+    }
+  }
+
   const nodeCanvasObject = useCallback((node, ctx) => {
     const size = getNodeSize(node)
     const color = getNodeColor(node)
@@ -57,14 +88,29 @@ function NetworkGraph({ graphData, nodeStates }) {
     ctx.fillStyle = color
     ctx.fill()
 
-    // Add pulsing animation for infected nodes
     if (nodeStates[node.id] === 'infected') {
-      const pulseRadius = size + (Math.sin(Date.now() / 300) + 1) * 2.5;
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, pulseRadius, 0, 2 * Math.PI, false);
-      ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)'; // Red with transparency
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      const pulse1 = size + (Math.sin(animationTime.current * 0.05) + 1) * 2
+      const pulse2 = size + (Math.sin(animationTime.current * 0.05 + Math.PI) + 1) * 1.5
+      
+      ctx.beginPath()
+      ctx.arc(node.x, node.y, pulse1, 0, 2 * Math.PI, false)
+      ctx.strokeStyle = `rgba(239, 68, 68, ${0.6 - (pulse1 - size) / 8})`
+      ctx.lineWidth = 2
+      ctx.stroke()
+
+      ctx.beginPath()
+      ctx.arc(node.x, node.y, pulse2, 0, 2 * Math.PI, false)
+      ctx.strokeStyle = `rgba(239, 68, 68, ${0.4 - (pulse2 - size) / 8})`
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+
+      ctx.shadowBlur = 15
+      ctx.shadowColor = 'rgba(239, 68, 68, 0.8)'
+      ctx.beginPath()
+      ctx.arc(node.x, node.y, size, 0, 2 * Math.PI, false)
+      ctx.fillStyle = color
+      ctx.fill()
+      ctx.shadowBlur = 0
     }
   }, [nodeStates]);
 
@@ -98,13 +144,13 @@ function NetworkGraph({ graphData, nodeStates }) {
             graphRef.current.zoomToFit(400, 80)
           }
         }}
-        // Animate particles from infected to susceptible nodes
         linkDirectionalParticles={useCallback(link => 
-          (nodeStates[link.source.id] === 'infected' && nodeStates[link.target.id] === 'susceptible') ? 1 : 0
+          (nodeStates[link.source.id] === 'infected' && nodeStates[link.target.id] === 'susceptible') ? 3 : 0
         , [nodeStates])}
-        linkDirectionalParticleSpeed={0.008}
-        linkDirectionalParticleWidth={2.5}
-        linkDirectionalParticleColor={() => 'rgba(239, 68, 68, 0.8)'}
+        linkDirectionalParticleSpeed={0.005}
+        linkDirectionalParticleWidth={3}
+        linkDirectionalParticleColor={() => 'rgba(239, 68, 68, 0.9)'}
+        d3VelocityDecay={0.3}
       />
 
       <div className="absolute top-4 right-4 bg-slate-800/95 backdrop-blur-sm rounded-lg p-4 border border-slate-700 shadow-xl">
@@ -129,6 +175,30 @@ function NetworkGraph({ graphData, nodeStates }) {
         <div className="text-xs text-slate-400">
           <span className="font-semibold text-emerald-400">Tip:</span> Drag nodes to rearrange | Scroll to zoom | Drag background to pan
         </div>
+      </div>
+
+      <div className="absolute bottom-4 right-4 flex gap-2">
+        <button
+          onClick={handleZoomIn}
+          className="bg-slate-800/95 backdrop-blur-sm hover:bg-slate-700 text-white p-3 rounded-lg border border-slate-700 shadow-xl transition-all hover:scale-110"
+          title="Zoom In"
+        >
+          <ZoomIn size={20} />
+        </button>
+        <button
+          onClick={handleZoomOut}
+          className="bg-slate-800/95 backdrop-blur-sm hover:bg-slate-700 text-white p-3 rounded-lg border border-slate-700 shadow-xl transition-all hover:scale-110"
+          title="Zoom Out"
+        >
+          <ZoomOut size={20} />
+        </button>
+        <button
+          onClick={handleZoomToFit}
+          className="bg-slate-800/95 backdrop-blur-sm hover:bg-slate-700 text-white p-3 rounded-lg border border-slate-700 shadow-xl transition-all hover:scale-110"
+          title="Fit to Screen"
+        >
+          <Maximize2 size={20} />
+        </button>
       </div>
     </div>
   )

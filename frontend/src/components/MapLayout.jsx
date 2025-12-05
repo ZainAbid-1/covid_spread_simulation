@@ -24,9 +24,10 @@ const MapLayout = ({ graphData, nodeStates }) => {
 
     const { nodes, links } = graphData;
 
-    // Bounding box for a fictional town (e.g., a part of Manhattan)
-    const latMin = 40.7128, latMax = 40.7484;
-    const lonMin = -74.0060, lonMax = -73.9855;
+    // Bounding box for Balochistan, Pakistan (largest province)
+    // Covers a large area to ensure people are well-spaced and distant
+    const latMin = 25.5, latMax = 31.5;
+    const lonMin = 61.5, lonMax = 69.5;
 
     const xCoords = nodes.map(n => n.x);
     const yCoords = nodes.map(n => n.y);
@@ -73,29 +74,48 @@ const MapLayout = ({ graphData, nodeStates }) => {
   }
 
   return (
-    <MapContainer center={scaledData.center} zoom={15} style={{ height: '100%', width: '100%' }}>
+    <MapContainer 
+      center={scaledData.center} 
+      zoom={7} 
+      style={{ height: '100%', width: '100%' }}
+      zoomControl={true}
+      scrollWheelZoom={true}
+      doubleClickZoom={true}
+      touchZoom={true}
+      dragging={true}
+    >
       <TileLayer
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        minZoom={6}
+        maxZoom={18}
       />
       {scaledData.links.map(link => (
         <Polyline
           key={link.id}
           positions={link.positions}
-          color="#4b5563" // Slate-600
-          weight={1}
+          color="#4b5563"
+          weight={0.8}
+          opacity={0.3}
+          smoothFactor={1}
         />
       ))}
       {scaledData.nodes.map(node => (
         <CircleMarker
           key={node.id}
           center={[node.lat, node.lon]}
-          radius={5}
+          radius={6}
           color={getNodeColor(nodeStates[node.id])}
-          fillOpacity={0.8}
-          stroke={false}
+          fillColor={getNodeColor(nodeStates[node.id])}
+          fillOpacity={0.85}
+          weight={2}
+          opacity={1}
         >
-          <Tooltip>{`Person ${node.id}`}</Tooltip>
+          <Tooltip direction="top" offset={[0, -6]} opacity={0.9}>
+            <div style={{ fontSize: '12px', fontWeight: '600' }}>
+              Person {node.id}
+            </div>
+          </Tooltip>
         </CircleMarker>
       ))}
     </MapContainer>
