@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 
 function NetworkGraph({ graphData, nodeStates }) {
@@ -23,12 +23,9 @@ function NetworkGraph({ graphData, nodeStates }) {
 
   useEffect(() => {
     if (graphRef.current && graphData) {
-      graphRef.current.d3Force('charge').strength(-120)
-      graphRef.current.d3Force('link').distance(40)
-      graphRef.current.d3Force('collide', graphRef.current.d3Force('center'))
-
-      graphRef.current.d3Force('center').strength(0.05)
-
+      graphRef.current.d3Force('charge').strength(-150) // More repulsion
+      graphRef.current.d3Force('link').distance(50)   // More space
+      graphRef.current.d3Force('center').strength(0.01) // Weaker center force
       graphRef.current.d3ReheatSimulation()
     }
   }, [graphData])
@@ -37,12 +34,12 @@ function NetworkGraph({ graphData, nodeStates }) {
     const state = nodeStates[node.id] || 'susceptible'
     switch (state) {
       case 'infected':
-        return '#ef4444'
+        return '#ef4444' // Red
       case 'recovered':
-        return '#3b82f6'
+        return '#3b82f6' // Blue
       case 'susceptible':
       default:
-        return '#10b981'
+        return '#10b981' // Green
     }
   }
 
@@ -50,6 +47,26 @@ function NetworkGraph({ graphData, nodeStates }) {
     const state = nodeStates[node.id] || 'susceptible'
     return state === 'infected' ? 5 : 3.5
   }
+
+  const nodeCanvasObject = useCallback((node, ctx) => {
+    const size = getNodeSize(node)
+    const color = getNodeColor(node)
+
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, size, 0, 2 * Math.PI, false)
+    ctx.fillStyle = color
+    ctx.fill()
+
+    // Add pulsing animation for infected nodes
+    if (nodeStates[node.id] === 'infected') {
+      const pulseRadius = size + (Math.sin(Date.now() / 300) + 1) * 2.5;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, pulseRadius, 0, 2 * Math.PI, false);
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)'; // Red with transparency
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }, [nodeStates]);
 
   if (!graphData) {
     return (
@@ -66,38 +83,11 @@ function NetworkGraph({ graphData, nodeStates }) {
         graphData={graphData}
         width={dimensions.width}
         height={dimensions.height}
-        nodeColor={getNodeColor}
-        nodeRelSize={getNodeSize}
+        nodeCanvasObject={nodeCanvasObject}
+        nodePointerAreaPaint={null}
         linkColor={() => '#334155'}
         linkWidth={0.8}
         backgroundColor="#0f172a"
-        nodeCanvasObject={(node, ctx) => {
-          const size = getNodeSize(node)
-          const color = getNodeColor(node)
-
-          ctx.beginPath()
-          ctx.arc(node.x, node.y, size, 0, 2 * Math.PI)
-          ctx.fillStyle = color
-          ctx.fill()
-
-          if (nodeStates[node.id] === 'infected') {
-            ctx.beginPath()
-            ctx.arc(node.x, node.y, size + 3, 0, 2 * Math.PI)
-            ctx.strokeStyle = color
-            ctx.lineWidth = 2
-            ctx.globalAlpha = 0.6
-            ctx.stroke()
-            ctx.globalAlpha = 1
-
-            ctx.beginPath()
-            ctx.arc(node.x, node.y, size + 6, 0, 2 * Math.PI)
-            ctx.strokeStyle = color
-            ctx.lineWidth = 1.5
-            ctx.globalAlpha = 0.3
-            ctx.stroke()
-            ctx.globalAlpha = 1
-          }
-        }}
         enableNodeDrag={true}
         enableZoomInteraction={true}
         enablePanInteraction={true}
@@ -108,13 +98,13 @@ function NetworkGraph({ graphData, nodeStates }) {
             graphRef.current.zoomToFit(400, 80)
           }
         }}
-        nodePointerAreaPaint={(node, color, ctx) => {
-          ctx.fillStyle = color
-          ctx.beginPath()
-          ctx.arc(node.x, node.y, 8, 0, 2 * Math.PI)
-          ctx.fill()
-        }}
-        linkDirectionalParticles={0}
+        // Animate particles from infected to susceptible nodes
+        linkDirectionalParticles={useCallback(link => 
+          (nodeStates[link.source.id] === 'infected' && nodeStates[link.target.id] === 'susceptible') ? 1 : 0
+        , [nodeStates])}
+        linkDirectionalParticleSpeed={0.008}
+        linkDirectionalParticleWidth={2.5}
+        linkDirectionalParticleColor={() => 'rgba(239, 68, 68, 0.8)'}
       />
 
       <div className="absolute top-4 right-4 bg-slate-800/95 backdrop-blur-sm rounded-lg p-4 border border-slate-700 shadow-xl">

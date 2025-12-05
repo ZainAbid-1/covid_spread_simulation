@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import NetworkGraph from './components/NetworkGraph'
+import MapLayout from './components/MapLayout'
 import Statistics from './components/Statistics'
 import ControlPanel from './components/ControlPanel'
 import Timeline from './components/Timeline'
-import { Play, Pause, RotateCcw, Activity, BarChart3, Network } from 'lucide-react'
+import { Play, Pause, RotateCcw, Activity, BarChart3, Map } from 'lucide-react'
 
 function App() {
   const [graphData, setGraphData] = useState(null)
@@ -12,7 +12,7 @@ function App() {
   const [currentStep, setCurrentStep] = useState(0)
   const [nodeStates, setNodeStates] = useState({})
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('network')
+  const [activeTab, setActiveTab] = useState('map')
   const [params, setParams] = useState({
     beta: 0.2,
     gamma_days: 2,
@@ -121,7 +121,7 @@ function App() {
   }
 
   const tabs = [
-    { id: 'network', label: 'Network', icon: Network },
+    { id: 'map', label: 'Map', icon: Map },
     { id: 'statistics', label: 'Statistics', icon: BarChart3 },
     { id: 'timeline', label: 'Timeline', icon: Activity }
   ]
@@ -141,9 +141,9 @@ function App() {
       <div className="container mx-auto px-4 py-6">
         <header className="mb-8">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent mb-2">
-            Disease Spread Simulation
+            Virus Spread Simulation
           </h1>
-          <p className="text-slate-400">Real-time SIR Model Visualization</p>
+          <p className="text-slate-400">Real-time Virus Model Visualization</p>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -226,9 +226,9 @@ function App() {
                 ))}
               </div>
 
-              <div className="p-6">
+              <div className="p-6 h-[600px]">
                 {loading && (
-                  <div className="flex items-center justify-center h-96">
+                  <div className="flex items-center justify-center h-full">
                     <div className="text-center">
                       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-400 mx-auto mb-4"></div>
                       <p className="text-slate-400">Loading...</p>
@@ -236,8 +236,8 @@ function App() {
                   </div>
                 )}
 
-                {!loading && activeTab === 'network' && (
-                  <NetworkGraph
+                {!loading && activeTab === 'map' && (
+                  <MapLayout
                     graphData={graphData}
                     nodeStates={nodeStates}
                   />

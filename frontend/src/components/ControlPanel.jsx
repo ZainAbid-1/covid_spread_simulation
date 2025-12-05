@@ -7,12 +7,12 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
 
   return (
     <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-      <h2 className="text-xl font-bold mb-6 text-emerald-400">Simulation Parameters</h2>
+      <h2 className="text-xl font-bold mb-6 text-emerald-400">Virus Simulation Parameters</h2>
 
       <div className="space-y-6">
         <div>
           <label className="block text-sm font-medium mb-2 text-slate-300">
-            Transmission Probability (β)
+            Transmission Rate (β)
           </label>
           <input
             type="range"
@@ -29,13 +29,13 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
             <span>1.0</span>
           </div>
           <p className="text-xs text-slate-500 mt-2">
-            Probability of infection per contact
+            Rate of infection per contact
           </p>
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-2 text-slate-300">
-            Recovery Time (days)
+            Recovery Rate (γ)
           </label>
           <input
             type="range"
@@ -52,7 +52,7 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
             <span>14</span>
           </div>
           <p className="text-xs text-slate-500 mt-2">
-            Days until infected person recovers
+            Days until an infected person recovers
           </p>
         </div>
 
@@ -75,7 +75,7 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
             <span>50</span>
           </div>
           <p className="text-xs text-slate-500 mt-2">
-            Number of patient zeros
+            Number of initially infected individuals
           </p>
         </div>
 
