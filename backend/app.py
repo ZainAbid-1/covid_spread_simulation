@@ -1,6 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import networkx as nx
+import json
 import data_loader as data_loader
 import sir_model as sir_model
 
@@ -15,15 +16,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cache the graph layout so we don't recompute it every reload (Expensive!)
-# Using Spring Layout (Force-Directed) as required by the PDF
-print(" 🧠 Pre-computing Force-Directed Layout... (This runs once)")
+print("🧠 Pre-computing Optimized Graph Layout...")
 if data_loader.static_graph:
-    # k=0.15 controls node spacing. Iterations=50 for speed vs accuracy.
-    pos = nx.spring_layout(data_loader.static_graph, k=0.15, iterations=20, seed=42)
+    pos = data_loader.compute_graph_layout(data_loader.static_graph)
 else:
     pos = {}
-print(" ✅ Layout computed.")
+print("✅ Layout computed.")
 
 @app.get("/")
 def read_root():
@@ -37,26 +35,26 @@ def get_graph_structure():
     """
     nodes = []
     for node_id, (x, y) in pos.items():
-        nodes.append({"id": int(node_id), "x": x * 1000, "y": y * 1000}) # Scale up for canvas
+        nodes.append({"id": int(node_id), "x": x * 2000, "y": y * 2000})
 
-    # We limit edges for the frontend visualization to avoid lag if > 50k edges
-    # We only send edges if they appeared in the contact list
     edges = []
-    # Use the static graph edges
-    for u, v in data_loader.static_graph.edges():
+    edge_list = list(data_loader.static_graph.edges())
+    total_edges = len(edge_list)
+    
+    for u, v in edge_list:
         edges.append({"source": int(u), "target": int(v)})
+    
+    print(f"⚡ Sending all {total_edges} edges and {len(nodes)} nodes")
 
     return {"nodes": nodes, "links": edges}
 
 @app.get("/simulate")
 def run_sim(beta: float = 0.2, gamma_days: int = 2, start_nodes: int = 5):
     """
-    Runs the SIR model with custom parameters.
-    beta: Transmission probability per contact (0.0 to 1.0)
-    gamma_days: How many days until recovery
-    start_nodes: Number of initially infected people
+    Legacy endpoint: Returns complete simulation results at once.
+    For backward compatibility with existing frontend code.
     """
-    print(f"🧪 Starting Simulation: p={beta}, rec={gamma_days} days")
+    print(f"🧪 Starting Batch Simulation: p={beta}, rec={gamma_days} days")
     results = sir_model.run_simulation(
         data_loader.contacts_df,
         patient_zero_count=start_nodes,
@@ -64,3 +62,41 @@ def run_sim(beta: float = 0.2, gamma_days: int = 2, start_nodes: int = 5):
         recovery_days=gamma_days
     )
     return results
+
+@app.websocket("/ws/simulate")
+async def websocket_simulate(websocket: WebSocket):
+    """
+    WebSocket endpoint: Streams simulation results step-by-step.
+    Prevents timeout and reduces memory consumption.
+    Client receives data as it's computed.
+    """
+    await websocket.accept()
+    
+    try:
+        data = await websocket.receive_text()
+        params = json.loads(data)
+        
+        beta = float(params.get("beta", 0.2))
+        gamma_days = int(params.get("gamma_days", 2))
+        start_nodes = int(params.get("start_nodes", 5))
+        
+        print(f"🧪 Starting Streaming Simulation: p={beta}, rec={gamma_days} days")
+        
+        for step in sir_model.run_simulation_generator(
+            data_loader.contacts_df,
+            patient_zero_count=start_nodes,
+            transmission_prob=beta,
+            recovery_days=gamma_days
+        ):
+            await websocket.send_json(step)
+        
+        await websocket.send_json({"done": True})
+        print("✅ Simulation stream completed")
+        
+    except WebSocketDisconnect:
+        print("⚠️ Client disconnected during simulation")
+    except Exception as e:
+        print(f"❌ Error in WebSocket simulation: {e}")
+        await websocket.send_json({"error": str(e)})
+    finally:
+        await websocket.close()

@@ -35,7 +35,7 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
 
         <div>
           <label className="block text-sm font-medium mb-2 text-slate-300">
-            Recovery Rate (γ)
+            Average Recovery Time (γ)
           </label>
           <input
             type="range"
@@ -48,11 +48,11 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
           />
           <div className="flex justify-between text-xs text-slate-400 mt-1">
             <span>1</span>
-            <span className="font-bold text-cyan-400">{params.gamma_days} days</span>
+            <span className="font-bold text-cyan-400">{params.gamma_days} days (avg)</span>
             <span>150</span>
           </div>
           <p className="text-xs text-slate-500 mt-2">
-            Days until an infected person recovers
+            Mean recovery days (actual varies ±20% using normal distribution)
           </p>
         </div>
 

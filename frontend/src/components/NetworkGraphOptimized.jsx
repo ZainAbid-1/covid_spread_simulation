@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import ForceGraph2D from 'react-force-graph-2d'
+import ForceGraph3D from 'react-force-graph-3d'
 import { ZoomIn, ZoomOut, Maximize2, Target, Maximize } from 'lucide-react'
 
-function NetworkGraph({ graphData, nodeStates }) {
+function NetworkGraphOptimized({ graphData, nodeStates }) {
   const graphRef = useRef()
   const containerRef = useRef()
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const animationTime = useRef(0)
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -30,90 +29,65 @@ function NetworkGraph({ graphData, nodeStates }) {
 
   useEffect(() => {
     if (graphRef.current && graphData) {
-      graphRef.current.d3Force('charge').strength(-200)
-      graphRef.current.d3Force('link').distance(60)
-      graphRef.current.d3Force('center').strength(0.05)
-      graphRef.current.d3Force('collision', null)
-      graphRef.current.d3ReheatSimulation()
-      
       setTimeout(() => {
         if (graphRef.current) {
-          graphRef.current.zoomToFit(1000, 150)
+          graphRef.current.cameraPosition({ z: 2000 }, { x: 0, y: 0, z: 0 }, 1000)
         }
       }, 500)
     }
   }, [graphData])
 
-  const getNodeColor = (node) => {
+  const getNodeColor = useCallback((node) => {
     const state = nodeStates[node.id] || 'susceptible'
     switch (state) {
       case 'infected':
-        return '#ef4444' // Red
+        return '#ef4444'
       case 'recovered':
-        return '#3b82f6' // Blue
+        return '#3b82f6'
       case 'susceptible':
       default:
-        return '#10b981' // Green
+        return '#10b981'
     }
-  }
+  }, [nodeStates])
 
-  const getNodeSize = (node) => {
+  const getNodeSize = useCallback((node) => {
     const state = nodeStates[node.id] || 'susceptible'
-    return state === 'infected' ? 5 : 3.5
-  }
-
-  useEffect(() => {
-    const animate = () => {
-      animationTime.current += 1
-      requestAnimationFrame(animate)
-    }
-    const animationId = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(animationId)
-  }, [])
+    return state === 'infected' ? 8 : 5
+  }, [nodeStates])
 
   const handleZoomIn = () => {
     if (graphRef.current) {
-      const currentZoom = graphRef.current.zoom()
-      graphRef.current.zoom(currentZoom * 1.3, 400)
+      const camera = graphRef.current.camera()
+      const currentZ = camera.position.z
+      graphRef.current.cameraPosition({ z: currentZ * 0.7 }, null, 400)
     }
   }
 
   const handleZoomOut = () => {
     if (graphRef.current) {
-      const currentZoom = graphRef.current.zoom()
-      graphRef.current.zoom(currentZoom / 1.3, 400)
+      const camera = graphRef.current.camera()
+      const currentZ = camera.position.z
+      graphRef.current.cameraPosition({ z: currentZ * 1.3 }, null, 400)
     }
   }
 
   const handleZoomToFit = () => {
     if (graphRef.current) {
-      graphRef.current.zoomToFit(400, 80)
+      graphRef.current.cameraPosition({ z: 2000 }, { x: 0, y: 0, z: 0 }, 1000)
     }
   }
 
   const handleGoToHotspot = () => {
     if (!graphRef.current || !graphData) return
 
-    const infectionCounts = {}
-    
-    graphData.links.forEach(link => {
-      const sourceId = link.source.id || link.source
-      const targetId = link.target.id || link.target
-      
-      if (nodeStates[sourceId] === 'infected') {
-        infectionCounts[sourceId] = (infectionCounts[sourceId] || 0) + 1
-      }
-    })
-
-    const hotspotId = Object.keys(infectionCounts).reduce((a, b) => 
-      infectionCounts[a] > infectionCounts[b] ? a : b, Object.keys(infectionCounts)[0]
-    )
-
-    const hotspotNode = graphData.nodes.find(n => n.id === parseInt(hotspotId))
-    
-    if (hotspotNode) {
-      graphRef.current.centerAt(hotspotNode.x, hotspotNode.y, 1000)
-      graphRef.current.zoom(3, 1000)
+    const infectedNodes = graphData.nodes.filter(n => nodeStates[n.id] === 'infected')
+    if (infectedNodes.length > 0) {
+      const hotspot = infectedNodes[0]
+      graphRef.current.cameraPosition(
+        { x: hotspot.x, y: hotspot.y, z: 500 },
+        { x: hotspot.x, y: hotspot.y, z: 0 },
+        1000
+      )
     }
   }
 
@@ -135,41 +109,6 @@ function NetworkGraph({ graphData, nodeStates }) {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [])
 
-  const nodeCanvasObject = useCallback((node, ctx) => {
-    const size = getNodeSize(node)
-    const color = getNodeColor(node)
-
-    ctx.beginPath()
-    ctx.arc(node.x, node.y, size, 0, 2 * Math.PI, false)
-    ctx.fillStyle = color
-    ctx.fill()
-
-    if (nodeStates[node.id] === 'infected') {
-      const pulse1 = size + (Math.sin(animationTime.current * 0.05) + 1) * 2
-      const pulse2 = size + (Math.sin(animationTime.current * 0.05 + Math.PI) + 1) * 1.5
-      
-      ctx.beginPath()
-      ctx.arc(node.x, node.y, pulse1, 0, 2 * Math.PI, false)
-      ctx.strokeStyle = `rgba(239, 68, 68, ${0.6 - (pulse1 - size) / 8})`
-      ctx.lineWidth = 2
-      ctx.stroke()
-
-      ctx.beginPath()
-      ctx.arc(node.x, node.y, pulse2, 0, 2 * Math.PI, false)
-      ctx.strokeStyle = `rgba(239, 68, 68, ${0.4 - (pulse2 - size) / 8})`
-      ctx.lineWidth = 1.5
-      ctx.stroke()
-
-      ctx.shadowBlur = 15
-      ctx.shadowColor = 'rgba(239, 68, 68, 0.8)'
-      ctx.beginPath()
-      ctx.arc(node.x, node.y, size, 0, 2 * Math.PI, false)
-      ctx.fillStyle = color
-      ctx.fill()
-      ctx.shadowBlur = 0
-    }
-  }, [nodeStates]);
-
   if (!graphData) {
     return (
       <div className="flex items-center justify-center h-full text-slate-400">
@@ -178,37 +117,35 @@ function NetworkGraph({ graphData, nodeStates }) {
     )
   }
 
+  const graphDataWith3D = {
+    nodes: graphData.nodes.map(n => ({ ...n, z: 0 })),
+    links: graphData.links
+  }
+
   return (
     <div ref={containerRef} id="graph-container" className="relative w-full h-full bg-slate-900 rounded-lg overflow-hidden" style={{ minHeight: '600px' }}>
-      <ForceGraph2D
+      <ForceGraph3D
         ref={graphRef}
-        graphData={graphData}
+        graphData={graphDataWith3D}
         width={dimensions.width}
         height={dimensions.height}
-        nodeCanvasObject={nodeCanvasObject}
-        nodePointerAreaPaint={null}
-        nodeRelSize={6}
+        nodeVal={getNodeSize}
+        nodeColor={getNodeColor}
+        nodeRelSize={5}
         linkColor={() => '#334155'}
-        linkWidth={0.5}
+        linkWidth={0.3}
+        linkOpacity={0.5}
         backgroundColor="#0f172a"
         enableNodeDrag={false}
-        enableZoomInteraction={true}
-        enablePanInteraction={true}
-        cooldownTime={0}
-        cooldownTicks={0}
-        warmupTicks={0}
-        nodeX={d => d.x}
-        nodeY={d => d.y}
-        onEngineStop={() => {
-          if (graphRef.current) {
-            graphRef.current.zoomToFit(400, 100)
-          }
-        }}
-        linkDirectionalParticles={0}
+        enableNavigationControls={false}
+        showNavInfo={false}
+        nodeThreeObject={null}
+        dagMode={null}
+        d3AlphaDecay={0.02}
         d3VelocityDecay={0.3}
-        autoPauseRedraw={false}
-        minZoom={0.1}
-        maxZoom={8}
+        warmupTicks={0}
+        cooldownTicks={0}
+        nodeAutoColorBy={null}
       />
 
       <div className="absolute top-4 right-4 bg-slate-800/95 backdrop-blur-sm rounded-lg p-4 border border-slate-700 shadow-xl">
@@ -231,7 +168,7 @@ function NetworkGraph({ graphData, nodeStates }) {
 
       <div className="absolute bottom-4 left-4 bg-slate-800/95 backdrop-blur-sm rounded-lg px-4 py-2 border border-slate-700 shadow-xl">
         <div className="text-xs text-slate-400">
-          <span className="font-semibold text-emerald-400">Tip:</span> Drag nodes to rearrange | Scroll to zoom | Drag background to pan
+          <span className="font-semibold text-emerald-400">Tip:</span> Drag to rotate | Scroll to zoom | Right-click to pan
         </div>
       </div>
 
@@ -239,7 +176,7 @@ function NetworkGraph({ graphData, nodeStates }) {
         <button
           onClick={handleGoToHotspot}
           className="bg-slate-800/95 backdrop-blur-sm hover:bg-red-600 text-white p-3 rounded-lg border border-slate-700 shadow-xl transition-all hover:scale-110"
-          title="Go to Transmission Hotspot"
+          title="Go to Infection Hotspot"
         >
           <Target size={20} />
         </button>
@@ -260,7 +197,7 @@ function NetworkGraph({ graphData, nodeStates }) {
         <button
           onClick={handleZoomToFit}
           className="bg-slate-800/95 backdrop-blur-sm hover:bg-slate-700 text-white p-3 rounded-lg border border-slate-700 shadow-xl transition-all hover:scale-110"
-          title="Fit to Screen"
+          title="Reset View"
         >
           <Maximize2 size={20} />
         </button>
@@ -276,4 +213,4 @@ function NetworkGraph({ graphData, nodeStates }) {
   )
 }
 
-export default NetworkGraph
+export default NetworkGraphOptimized

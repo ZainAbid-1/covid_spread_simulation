@@ -2,9 +2,49 @@ import pandas as pd
 import networkx as nx
 import glob
 import os
+from config import Config
 
-# Configuration
-DATASET_PATH = os.path.join("..", "dataset") # Looks one folder up
+DATASET_PATH = os.path.join("..", "dataset")
+
+def compute_graph_layout(G):
+    """
+    Computes an optimized graph layout based on graph size.
+    For very large graphs (>5000 nodes), uses random layout (instant).
+    For smaller graphs, uses spring layout with minimal iterations.
+    """
+    graph_size = len(G.nodes())
+    settings = Config.get_layout_settings(graph_size)
+    
+    print(f"📊 Graph size: {graph_size} nodes")
+    print(f"🎯 Using {settings['algorithm']} layout algorithm")
+    
+    if settings["algorithm"] == "random":
+        pos = nx.random_layout(G, seed=42)
+    elif settings["algorithm"] == "circular":
+        pos = nx.circular_layout(G)
+    elif settings["algorithm"] == "spring_fast":
+        pos = nx.spring_layout(
+            G, 
+            k=settings.get("k", 2.0),
+            iterations=settings["iterations"],
+            seed=42
+        )
+    elif settings["algorithm"] == "spring_optimized":
+        pos = nx.spring_layout(
+            G, 
+            k=settings.get("k", 0.15),
+            iterations=settings["iterations"],
+            seed=42
+        )
+    else:
+        pos = nx.spring_layout(
+            G,
+            k=settings.get("k", 0.15),
+            iterations=settings["iterations"],
+            seed=42
+        )
+    
+    return pos
 
 def load_data():
     """
@@ -22,11 +62,9 @@ def load_data():
 
     print(f"📂 Found {len(all_files)} daily files. Loading... (This might take a moment)")
     
-    # Read all files into a list of dataframes
     df_list = []
     for filename in all_files:
         try:
-            # SocioPatterns format: timestamp <tab> id1 <tab> id2
             df = pd.read_csv(filename, sep='\t', header=None, names=['timestamp', 'u', 'v'])
             df_list.append(df)
         except Exception as e:
@@ -35,14 +73,9 @@ def load_data():
     if not df_list:
         raise ValueError("No data could be loaded.")
 
-    # Combine into one massive timeline
     full_df = pd.concat(df_list, ignore_index=True)
-    
-    # Sort by time (CRITICAL for the simulation loop)
     full_df.sort_values('timestamp', inplace=True)
     
-    # --- OPTIMIZATION: ID MAPPING ---
-    # Map huge IDs (e.g., 78577671) to simple integers (0, 1, 2) for array efficiency
     unique_ids = pd.unique(full_df[['u', 'v']].values.ravel('K'))
     id_map = {original: new_id for new_id, original in enumerate(unique_ids)}
     
@@ -51,12 +84,10 @@ def load_data():
     
     print(f"✅ Data Loaded! {len(full_df)} contacts between {len(unique_ids)} people.")
     
-    # Create a static graph for the Force-Directed Layout calculations
     G = nx.from_pandas_edgelist(full_df, 'u', 'v')
     
     return full_df, G, id_map
 
-# Load data once when this module is imported
 try:
     contacts_df, static_graph, id_mapping = load_data()
 except Exception as e:

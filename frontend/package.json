@@ -14,8 +14,10 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-force-graph-2d": "^1.23.14",
+    "react-force-graph-3d": "^1.29.0",
     "react-leaflet": "^4.2.1",
-    "recharts": "^2.10.3"
+    "recharts": "^2.10.3",
+    "three": "^0.160.1"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",

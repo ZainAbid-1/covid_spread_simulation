@@ -1,5 +1,8 @@
 fastapi
-uvicorn
+uvicorn[standard]
+websockets
 pandas
+numpy
 networkx
 scipy
+python-dotenv
