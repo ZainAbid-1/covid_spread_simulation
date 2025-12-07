@@ -1,32 +1,51 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { ZoomIn, ZoomOut, Maximize2, Target, Maximize } from 'lucide-react'
 
-function CustomTownMap({ graphData, nodeStates }) {
-  const canvasRef = useRef(null)
+function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
+  const baseLayerRef = useRef(null)
+  const activeLayerRef = useRef(null)
   const containerRef = useRef(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 2 })
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
-  const [scaledNodes, setScaledNodes] = useState([])
-  const [scaledLinks, setScaledLinks] = useState([])
+  const scaledNodesRef = useRef([])
+  const scaledLinksRef = useRef([])
   const [isFullscreen, setIsFullscreen] = useState(false)
   const animationFrameRef = useRef(null)
   const animationTime = useRef(0)
+  const resizeTimerRef = useRef(null)
 
   useEffect(() => {
     const updateDimensions = () => {
-      if (containerRef.current) {
-        setDimensions({
-          width: containerRef.current.offsetWidth,
-          height: containerRef.current.offsetHeight || 600
-        })
+      if (resizeTimerRef.current) {
+        clearTimeout(resizeTimerRef.current)
       }
+      
+      resizeTimerRef.current = setTimeout(() => {
+        if (containerRef.current) {
+          setDimensions({
+            width: containerRef.current.offsetWidth,
+            height: containerRef.current.offsetHeight || 600
+          })
+        }
+      }, 100)
     }
 
-    updateDimensions()
+    const resizeObserver = new ResizeObserver(updateDimensions)
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current)
+    }
+
     window.addEventListener('resize', updateDimensions)
-    return () => window.removeEventListener('resize', updateDimensions)
+    
+    return () => {
+      resizeObserver.disconnect()
+      window.removeEventListener('resize', updateDimensions)
+      if (resizeTimerRef.current) {
+        clearTimeout(resizeTimerRef.current)
+      }
+    }
   }, [isFullscreen])
 
   useEffect(() => {
@@ -73,8 +92,8 @@ function CustomTownMap({ graphData, nodeStates }) {
       }
     }).filter(l => l.source && l.target)
 
-    setScaledNodes(scaled)
-    setScaledLinks(scaledL)
+    scaledNodesRef.current = scaled
+    scaledLinksRef.current = scaledL
     
     if (scaled.length > 0) {
       const centerX = dimensions.width / 2
@@ -103,9 +122,15 @@ function CustomTownMap({ graphData, nodeStates }) {
   }, [graphData, dimensions])
 
   useEffect(() => {
+    drawBaseLayer()
+  }, [transform, dimensions])
+
+  useEffect(() => {
+    if (!isActive) return
+
     const animate = () => {
       animationTime.current += 1
-      drawCanvas()
+      drawActiveLayer()
       animationFrameRef.current = requestAnimationFrame(animate)
     }
     animationFrameRef.current = requestAnimationFrame(animate)
@@ -114,7 +139,7 @@ function CustomTownMap({ graphData, nodeStates }) {
         cancelAnimationFrame(animationFrameRef.current)
       }
     }
-  }, [scaledNodes, scaledLinks, nodeStates, transform])
+  }, [transform, isActive])
 
   const getNodeColor = (state) => {
     switch (state) {
@@ -124,8 +149,8 @@ function CustomTownMap({ graphData, nodeStates }) {
     }
   }
 
-  const drawCanvas = () => {
-    const canvas = canvasRef.current
+  const drawBaseLayer = () => {
+    const canvas = baseLayerRef.current
     if (!canvas) return
 
     const ctx = canvas.getContext('2d')
@@ -145,23 +170,77 @@ function CustomTownMap({ graphData, nodeStates }) {
       return x >= viewMinX && x <= viewMaxX && y >= viewMinY && y <= viewMaxY
     }
 
+    const scaledLinks = scaledLinksRef.current
+    const scaledNodes = scaledNodesRef.current
+    const nodeStates = nodeStatesRef.current
+
     ctx.strokeStyle = '#4b5563'
     ctx.lineWidth = 0.4 / transform.scale
     
     ctx.beginPath()
-    scaledLinks.forEach(link => {
+    for (let i = 0; i < scaledLinks.length; i++) {
+      const link = scaledLinks[i]
       if (!isInViewport(link.source.screenX, link.source.screenY) && 
           !isInViewport(link.target.screenX, link.target.screenY)) {
-        return
+        continue
       }
       
       ctx.moveTo(link.source.screenX, link.source.screenY)
       ctx.lineTo(link.target.screenX, link.target.screenY)
-    })
+    }
     ctx.stroke()
 
+    for (let i = 0; i < scaledNodes.length; i++) {
+      const node = scaledNodes[i]
+      if (!isInViewport(node.screenX, node.screenY)) continue
+
+      const state = nodeStates[node.id] || 'susceptible'
+      
+      if (state === 'susceptible') {
+        const color = getNodeColor(state)
+        const size = 7
+
+        ctx.beginPath()
+        ctx.arc(node.screenX, node.screenY, size, 0, 2 * Math.PI)
+        ctx.fillStyle = color
+        ctx.fill()
+        ctx.strokeStyle = color
+        ctx.lineWidth = 1.5 / transform.scale
+        ctx.stroke()
+      }
+    }
+
+    ctx.restore()
+  }
+
+  const drawActiveLayer = () => {
+    const canvas = activeLayerRef.current
+    if (!canvas) return
+
+    const ctx = canvas.getContext('2d')
+    ctx.clearRect(0, 0, dimensions.width, dimensions.height)
+
+    ctx.save()
+    ctx.translate(transform.x, transform.y)
+    ctx.scale(transform.scale, transform.scale)
+
+    const viewportMargin = 100 / transform.scale
+    const viewMinX = -transform.x / transform.scale - viewportMargin
+    const viewMaxX = (dimensions.width - transform.x) / transform.scale + viewportMargin
+    const viewMinY = -transform.y / transform.scale - viewportMargin
+    const viewMaxY = (dimensions.height - transform.y) / transform.scale + viewportMargin
+
+    const isInViewport = (x, y) => {
+      return x >= viewMinX && x <= viewMaxX && y >= viewMinY && y <= viewMaxY
+    }
+
+    const scaledLinks = scaledLinksRef.current
+    const scaledNodes = scaledNodesRef.current
+    const nodeStates = nodeStatesRef.current
+
     const activeLinks = []
-    scaledLinks.forEach(link => {
+    for (let i = 0; i < scaledLinks.length; i++) {
+      const link = scaledLinks[i]
       if (nodeStates[link.source.id] === 'infected' && 
           nodeStates[link.target.id] === 'susceptible') {
         if (isInViewport(link.source.screenX, link.source.screenY) || 
@@ -169,23 +248,28 @@ function CustomTownMap({ graphData, nodeStates }) {
           activeLinks.push(link)
         }
       }
-    })
+    }
 
     if (activeLinks.length > 0) {
       ctx.strokeStyle = `rgba(239, 68, 68, ${0.4 + Math.sin(animationTime.current * 0.05) * 0.2})`
       ctx.lineWidth = 1.5 / transform.scale
       ctx.beginPath()
-      activeLinks.forEach(link => {
+      for (let i = 0; i < activeLinks.length; i++) {
+        const link = activeLinks[i]
         ctx.moveTo(link.source.screenX, link.source.screenY)
         ctx.lineTo(link.target.screenX, link.target.screenY)
-      })
+      }
       ctx.stroke()
     }
 
-    scaledNodes.forEach(node => {
-      if (!isInViewport(node.screenX, node.screenY)) return
+    for (let i = 0; i < scaledNodes.length; i++) {
+      const node = scaledNodes[i]
+      if (!isInViewport(node.screenX, node.screenY)) continue
 
       const state = nodeStates[node.id] || 'susceptible'
+      
+      if (state === 'susceptible') continue
+
       const color = getNodeColor(state)
       const size = state === 'infected' ? 10 : 7
 
@@ -213,17 +297,19 @@ function CustomTownMap({ graphData, nodeStates }) {
       ctx.strokeStyle = state === 'infected' ? '#fff' : color
       ctx.lineWidth = 1.5 / transform.scale
       ctx.stroke()
-    })
+    }
 
     ctx.restore()
   }
 
   const handleWheel = useCallback((e) => {
     e.preventDefault()
+    e.stopPropagation()
+    
     const delta = e.deltaY > 0 ? 0.92 : 1.08
     const newScale = Math.max(0.5, Math.min(10, transform.scale * delta))
     
-    const rect = canvasRef.current.getBoundingClientRect()
+    const rect = activeLayerRef.current.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
     
@@ -271,17 +357,21 @@ function CustomTownMap({ graphData, nodeStates }) {
 
   const handleGoToHotspot = () => {
     const infectionCounts = {}
+    const scaledLinks = scaledLinksRef.current
+    const nodeStates = nodeStatesRef.current
     
-    scaledLinks.forEach(link => {
+    for (let i = 0; i < scaledLinks.length; i++) {
+      const link = scaledLinks[i]
       if (nodeStates[link.source.id] === 'infected') {
         infectionCounts[link.source.id] = (infectionCounts[link.source.id] || 0) + 1
       }
-    })
+    }
 
     const hotspotId = Object.keys(infectionCounts).reduce((a, b) => 
       infectionCounts[a] > infectionCounts[b] ? a : b, Object.keys(infectionCounts)[0]
     )
 
+    const scaledNodes = scaledNodesRef.current
     const hotspotNode = scaledNodes.find(n => n.id === parseInt(hotspotId))
     
     if (hotspotNode) {
@@ -320,7 +410,14 @@ function CustomTownMap({ graphData, nodeStates }) {
   return (
     <div ref={containerRef} className="relative w-full h-full bg-slate-900 rounded-lg overflow-hidden">
       <canvas
-        ref={canvasRef}
+        ref={baseLayerRef}
+        width={dimensions.width}
+        height={dimensions.height}
+        className="absolute top-0 left-0"
+        style={{ pointerEvents: 'none' }}
+      />
+      <canvas
+        ref={activeLayerRef}
         width={dimensions.width}
         height={dimensions.height}
         onWheel={handleWheel}
@@ -328,7 +425,7 @@ function CustomTownMap({ graphData, nodeStates }) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        className="cursor-grab active:cursor-grabbing"
+        className="absolute top-0 left-0 cursor-grab active:cursor-grabbing"
         style={{ display: 'block' }}
       />
 

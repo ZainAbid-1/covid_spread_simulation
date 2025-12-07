@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import CustomTownMap from './components/CustomTownMap'
 import Statistics from './components/Statistics'
 import ControlPanel from './components/ControlPanel'
@@ -11,7 +11,7 @@ function App() {
   const [simulationData, setSimulationData] = useState(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
-  const [nodeStates, setNodeStates] = useState({})
+  const nodeStatesRef = useRef({})
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('map')
   const [playbackSpeed, setPlaybackSpeed] = useState(1)
@@ -44,7 +44,7 @@ function App() {
       data.nodes.forEach(node => {
         initialStates[node.id] = 'susceptible'
       })
-      setNodeStates(initialStates)
+      nodeStatesRef.current = initialStates
       setLoading(false)
     } catch (error) {
       console.error('Error fetching graph data:', error)
@@ -52,7 +52,9 @@ function App() {
     }
   }
 
-  const runSimulation = async (useWebSocket = true) => {
+  const memoizedGraphData = useMemo(() => graphData, [graphData])
+
+  const runSimulation = useCallback(async (useWebSocket = true) => {
     try {
       setLoading(true)
       setSimulationData([])
@@ -63,7 +65,7 @@ function App() {
       graphData?.nodes.forEach(node => {
         resetStates[node.id] = 'susceptible'
       })
-      setNodeStates(resetStates)
+      nodeStatesRef.current = resetStates
 
       if (useWebSocket) {
         const ws = new WebSocket('ws://localhost:8000/ws/simulate')
@@ -101,7 +103,7 @@ function App() {
             step.infected.forEach(id => {
               newStates[id] = 'infected'
             })
-            setNodeStates(newStates)
+            nodeStatesRef.current = newStates
             setLoading(false)
             setIsPlaying(true)
           }
@@ -127,9 +129,9 @@ function App() {
       console.error('Error running simulation:', error)
       setLoading(false)
     }
-  }
+  }, [params, graphData])
 
-  const runSimulationHTTP = async () => {
+  const runSimulationHTTP = useCallback(async () => {
     try {
       const response = await fetch(
         `http://localhost:8000/simulate?beta=${params.beta}&gamma_days=${params.gamma_days}&start_nodes=${params.start_nodes}`
@@ -138,14 +140,14 @@ function App() {
       setSimulationData(data)
 
       if (data.length > 0 && data[0].infected) {
-        const newStates = { ...nodeStates }
-        Object.keys(newStates).forEach(key => {
-          newStates[key] = 'susceptible'
+        const newStates = {}
+        graphData?.nodes.forEach(node => {
+          newStates[node.id] = 'susceptible'
         })
         data[0].infected.forEach(id => {
           newStates[id] = 'infected'
         })
-        setNodeStates(newStates)
+        nodeStatesRef.current = newStates
       }
 
       setLoading(false)
@@ -154,27 +156,27 @@ function App() {
       console.error('Error with HTTP simulation:', error)
       setLoading(false)
     }
-  }
+  }, [params, graphData])
 
-  const stopSimulation = () => {
+  const stopSimulation = useCallback(() => {
     setIsPlaying(false)
     setCurrentStep(0)
     const resetStates = {}
     graphData?.nodes.forEach(node => {
       resetStates[node.id] = 'susceptible'
     })
-    setNodeStates(resetStates)
-  }
+    nodeStatesRef.current = resetStates
+  }, [graphData])
 
-  const pauseSimulation = () => {
+  const pauseSimulation = useCallback(() => {
     setIsPlaying(false)
-  }
+  }, [])
 
-  const resumeSimulation = () => {
+  const resumeSimulation = useCallback(() => {
     if (currentStep < simulationData?.length) {
       setIsPlaying(true)
     }
-  }
+  }, [currentStep, simulationData])
 
   useEffect(() => {
     if (!isPlaying || !simulationData || simulationData.length === 0) {
@@ -188,29 +190,25 @@ function App() {
     const timer = setTimeout(() => {
       const step = simulationData[currentStep]
 
-      setNodeStates(prevStates => {
-        const newStates = { ...prevStates }
+      if (step.new_infected) {
+        step.new_infected.forEach(id => {
+          nodeStatesRef.current[id] = 'infected'
+        })
+      }
 
-        if (step.new_infected) {
-          step.new_infected.forEach(id => {
-            newStates[id] = 'infected'
-          })
-        }
-
-        if (step.new_recovered) {
-          step.new_recovered.forEach(id => {
-            newStates[id] = 'recovered'
-          })
-        }
-
-        return newStates
-      })
+      if (step.new_recovered) {
+        step.new_recovered.forEach(id => {
+          nodeStatesRef.current[id] = 'recovered'
+        })
+      }
 
       setCurrentStep(prev => prev + 1)
     }, 100 / playbackSpeed)
 
     return () => clearTimeout(timer)
   }, [isPlaying, currentStep, simulationData, playbackSpeed])
+
+
 
 
 
@@ -221,15 +219,15 @@ function App() {
     { id: 'timeline', label: 'Timeline', icon: Activity }
   ]
 
-  const getStatistics = () => {
+  const getStatistics = useCallback(() => {
     if (!simulationData || currentStep === 0) return { susceptible: graphData?.nodes.length || 0, infected: 0, recovered: 0 }
 
-    const infected = Object.values(nodeStates).filter(s => s === 'infected').length
-    const recovered = Object.values(nodeStates).filter(s => s === 'recovered').length
-    const susceptible = Object.values(nodeStates).filter(s => s === 'susceptible').length
+    const infected = Object.values(nodeStatesRef.current).filter(s => s === 'infected').length
+    const recovered = Object.values(nodeStatesRef.current).filter(s => s === 'recovered').length
+    const susceptible = Object.values(nodeStatesRef.current).filter(s => s === 'susceptible').length
 
     return { susceptible, infected, recovered }
-  }
+  }, [simulationData, currentStep, graphData])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
@@ -363,42 +361,44 @@ function App() {
                   </div>
                 )}
 
-                <div style={{ display: activeTab === 'map' ? 'block' : 'none' }} className="h-full">
-                  {!loading && graphData && (
+                {activeTab === 'map' && !loading && memoizedGraphData && (
+                  <div className="h-full">
                     <CustomTownMap
-                      graphData={graphData}
-                      nodeStates={nodeStates}
+                      graphData={memoizedGraphData}
+                      nodeStatesRef={nodeStatesRef}
+                      isActive={activeTab === 'map'}
                     />
-                  )}
-                </div>
+                  </div>
+                )}
 
-                <div style={{ display: activeTab === 'network' ? 'block' : 'none' }} className="h-full">
-                  {!loading && graphData && (
+                {activeTab === 'network' && !loading && memoizedGraphData && (
+                  <div className="h-full">
                     <NetworkGraph
-                      graphData={graphData}
-                      nodeStates={nodeStates}
+                      graphData={memoizedGraphData}
+                      nodeStatesRef={nodeStatesRef}
+                      isActive={activeTab === 'network'}
                     />
-                  )}
-                </div>
+                  </div>
+                )}
 
-                <div style={{ display: activeTab === 'statistics' ? 'block' : 'none' }} className="h-full">
-                  {!loading && simulationData && (
+                {activeTab === 'statistics' && !loading && simulationData && (
+                  <div className="h-full">
                     <Statistics
                       simulationData={simulationData}
                       currentStep={currentStep}
                       totalNodes={graphData?.nodes.length || 0}
                     />
-                  )}
-                </div>
+                  </div>
+                )}
 
-                <div style={{ display: activeTab === 'timeline' ? 'block' : 'none' }} className="h-full">
-                  {!loading && simulationData && (
+                {activeTab === 'timeline' && !loading && simulationData && (
+                  <div className="h-full">
                     <Timeline
                       simulationData={simulationData}
                       currentStep={currentStep}
                     />
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
