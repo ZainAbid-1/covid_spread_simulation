@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { ZoomIn, ZoomOut, Maximize2, Target, Maximize } from 'lucide-react'
+import { QuadTree, Point, Rectangle } from '../utils/QuadTree'
 
 function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
   const baseLayerRef = useRef(null)
@@ -11,6 +12,7 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const scaledNodesRef = useRef([])
   const scaledLinksRef = useRef([])
+  const nodeTreeRef = useRef(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const animationFrameRef = useRef(null)
   const animationTime = useRef(0)
@@ -94,6 +96,20 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
 
     scaledNodesRef.current = scaled
     scaledLinksRef.current = scaledL
+
+    const boundary = new Rectangle(
+      (width + padding * 2) / 2,
+      (height + padding * 2) / 2,
+      (width + padding * 2) / 2,
+      (height + padding * 2) / 2
+    )
+    const nodeTree = new QuadTree(boundary, 4)
+    
+    for (const node of scaled) {
+      nodeTree.insert(new Point(node.screenX, node.screenY, node))
+    }
+    
+    nodeTreeRef.current = nodeTree
     
     if (scaled.length > 0) {
       const centerX = dimensions.width / 2
@@ -143,6 +159,7 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
 
   const getNodeColor = (state) => {
     switch (state) {
+      case 'exposed': return '#f59e0b'
       case 'infected': return '#ef4444'
       case 'recovered': return '#3b82f6'
       default: return '#10b981'
@@ -160,18 +177,14 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
     ctx.translate(transform.x, transform.y)
     ctx.scale(transform.scale, transform.scale)
 
-    const viewportMargin = 100 / transform.scale
-    const viewMinX = -transform.x / transform.scale - viewportMargin
-    const viewMaxX = (dimensions.width - transform.x) / transform.scale + viewportMargin
-    const viewMinY = -transform.y / transform.scale - viewportMargin
-    const viewMaxY = (dimensions.height - transform.y) / transform.scale + viewportMargin
+    const centerX = -transform.x / transform.scale + (dimensions.width / transform.scale) / 2
+    const centerY = -transform.y / transform.scale + (dimensions.height / transform.scale) / 2
+    const halfW = (dimensions.width / transform.scale) / 2 + 50
+    const halfH = (dimensions.height / transform.scale) / 2 + 50
 
-    const isInViewport = (x, y) => {
-      return x >= viewMinX && x <= viewMaxX && y >= viewMinY && y <= viewMaxY
-    }
+    const viewRange = new Rectangle(centerX, centerY, halfW, halfH)
 
     const scaledLinks = scaledLinksRef.current
-    const scaledNodes = scaledNodesRef.current
     const nodeStates = nodeStatesRef.current
 
     ctx.strokeStyle = '#4b5563'
@@ -180,8 +193,8 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
     ctx.beginPath()
     for (let i = 0; i < scaledLinks.length; i++) {
       const link = scaledLinks[i]
-      if (!isInViewport(link.source.screenX, link.source.screenY) && 
-          !isInViewport(link.target.screenX, link.target.screenY)) {
+      if (!viewRange.contains(new Point(link.source.screenX, link.source.screenY)) && 
+          !viewRange.contains(new Point(link.target.screenX, link.target.screenY))) {
         continue
       }
       
@@ -190,10 +203,9 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
     }
     ctx.stroke()
 
-    for (let i = 0; i < scaledNodes.length; i++) {
-      const node = scaledNodes[i]
-      if (!isInViewport(node.screenX, node.screenY)) continue
+    const visibleNodes = nodeTreeRef.current ? nodeTreeRef.current.query(viewRange) : []
 
+    for (const node of visibleNodes) {
       const state = nodeStates[node.id] || 'susceptible'
       
       if (state === 'susceptible') {
@@ -224,18 +236,14 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
     ctx.translate(transform.x, transform.y)
     ctx.scale(transform.scale, transform.scale)
 
-    const viewportMargin = 100 / transform.scale
-    const viewMinX = -transform.x / transform.scale - viewportMargin
-    const viewMaxX = (dimensions.width - transform.x) / transform.scale + viewportMargin
-    const viewMinY = -transform.y / transform.scale - viewportMargin
-    const viewMaxY = (dimensions.height - transform.y) / transform.scale + viewportMargin
+    const centerX = -transform.x / transform.scale + (dimensions.width / transform.scale) / 2
+    const centerY = -transform.y / transform.scale + (dimensions.height / transform.scale) / 2
+    const halfW = (dimensions.width / transform.scale) / 2 + 50
+    const halfH = (dimensions.height / transform.scale) / 2 + 50
 
-    const isInViewport = (x, y) => {
-      return x >= viewMinX && x <= viewMaxX && y >= viewMinY && y <= viewMaxY
-    }
+    const viewRange = new Rectangle(centerX, centerY, halfW, halfH)
 
     const scaledLinks = scaledLinksRef.current
-    const scaledNodes = scaledNodesRef.current
     const nodeStates = nodeStatesRef.current
 
     const activeLinks = []
@@ -243,8 +251,8 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
       const link = scaledLinks[i]
       if (nodeStates[link.source.id] === 'infected' && 
           nodeStates[link.target.id] === 'susceptible') {
-        if (isInViewport(link.source.screenX, link.source.screenY) || 
-            isInViewport(link.target.screenX, link.target.screenY)) {
+        if (viewRange.contains(new Point(link.source.screenX, link.source.screenY)) || 
+            viewRange.contains(new Point(link.target.screenX, link.target.screenY))) {
           activeLinks.push(link)
         }
       }
@@ -262,16 +270,17 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
       ctx.stroke()
     }
 
-    for (let i = 0; i < scaledNodes.length; i++) {
-      const node = scaledNodes[i]
-      if (!isInViewport(node.screenX, node.screenY)) continue
+    const visibleNodes = nodeTreeRef.current ? nodeTreeRef.current.query(viewRange) : []
 
+    for (const node of visibleNodes) {
       const state = nodeStates[node.id] || 'susceptible'
       
       if (state === 'susceptible') continue
 
       const color = getNodeColor(state)
-      const size = state === 'infected' ? 10 : 7
+      let size = 7
+      if (state === 'infected') size = 10
+      else if (state === 'exposed') size = 8
 
       if (state === 'infected') {
         const pulse1 = size + (Math.sin(animationTime.current * 0.05) + 1) * 4
@@ -435,6 +444,10 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
             <span className="text-slate-300">Susceptible</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+            <span className="text-slate-300">Exposed</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-red-500 ring-2 ring-red-500/30"></div>

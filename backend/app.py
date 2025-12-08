@@ -49,17 +49,18 @@ def get_graph_structure():
     return {"nodes": nodes, "links": edges}
 
 @app.get("/simulate")
-def run_sim(beta: float = 0.2, gamma_days: int = 2, start_nodes: int = 5):
+def run_sim(beta: float = 0.2, gamma_days: int = 2, start_nodes: int = 5, incubation_days: int = 3):
     """
     Legacy endpoint: Returns complete simulation results at once.
     For backward compatibility with existing frontend code.
     """
-    print(f"🧪 Starting Batch Simulation: p={beta}, rec={gamma_days} days")
+    print(f"🧪 Starting Batch Simulation: p={beta}, rec={gamma_days} days, incubation={incubation_days} days")
     results = sir_model.run_simulation(
         data_loader.contacts_df,
         patient_zero_count=start_nodes,
         transmission_prob=beta,
-        recovery_days=gamma_days
+        recovery_days=gamma_days,
+        incubation_days=incubation_days
     )
     return results
 
@@ -79,14 +80,16 @@ async def websocket_simulate(websocket: WebSocket):
         beta = float(params.get("beta", 0.2))
         gamma_days = int(params.get("gamma_days", 2))
         start_nodes = int(params.get("start_nodes", 5))
+        incubation_days = int(params.get("incubation_days", 3))
         
-        print(f"🧪 Starting Streaming Simulation: p={beta}, rec={gamma_days} days")
+        print(f"🧪 Starting Streaming Simulation: p={beta}, rec={gamma_days} days, incubation={incubation_days} days")
         
         for step in sir_model.run_simulation_generator(
             data_loader.contacts_df,
             patient_zero_count=start_nodes,
             transmission_prob=beta,
-            recovery_days=gamma_days
+            recovery_days=gamma_days,
+            incubation_days=incubation_days
         ):
             await websocket.send_json(step)
         

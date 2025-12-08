@@ -51,6 +51,8 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
   const getNodeColor = useCallback((node) => {
     const state = nodeStatesRef.current[node.id] || 'susceptible'
     switch (state) {
+      case 'exposed':
+        return '#f59e0b'
       case 'infected':
         return '#ef4444'
       case 'recovered':
@@ -63,7 +65,9 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
 
   const getNodeSize = useCallback((node) => {
     const state = nodeStatesRef.current[node.id] || 'susceptible'
-    return state === 'infected' ? 8 : 5
+    if (state === 'infected') return 8
+    if (state === 'exposed') return 6
+    return 5
   }, [nodeStatesRef])
 
   const handleZoomIn = () => {
@@ -233,9 +237,20 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
         nodeRelSize={4}
         nodeCanvasObject={(node, ctx, globalScale) => {
           const state = nodeStatesRef.current[node.id] || 'susceptible'
-          const baseSize = state === 'infected' ? 8 : 5
+          let baseSize = 5
+          let color = '#10b981'
+          
+          if (state === 'infected') {
+            baseSize = 8
+            color = '#ef4444'
+          } else if (state === 'exposed') {
+            baseSize = 6
+            color = '#f59e0b'
+          } else if (state === 'recovered') {
+            color = '#3b82f6'
+          }
+          
           const size = baseSize / globalScale
-          const color = state === 'infected' ? '#ef4444' : state === 'recovered' ? '#3b82f6' : '#10b981'
           
           ctx.beginPath()
           ctx.arc(node.x, node.y, size, 0, 2 * Math.PI)
@@ -283,6 +298,10 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#10b981' }}></div>
             <span className="text-slate-300">Susceptible</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#f59e0b' }}></div>
+            <span className="text-slate-300">Exposed</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full ring-2 ring-red-500/30" style={{ backgroundColor: '#ef4444' }}></div>

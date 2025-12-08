@@ -12,12 +12,13 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
   const nodeStatesRef = useRef({})
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(true) 
   const [activeTab, setActiveTab] = useState('map')
   const [playbackSpeed, setPlaybackSpeed] = useState(1)
   const [params, setParams] = useState({
     beta: 0.2,
     gamma_days: 2,
+    incubation_days: 3,
     start_nodes: 5
   })
 
@@ -75,6 +76,7 @@ function App() {
           ws.send(JSON.stringify({
             beta: params.beta,
             gamma_days: params.gamma_days,
+            incubation_days: params.incubation_days,
             start_nodes: params.start_nodes
           }))
         }
@@ -103,6 +105,11 @@ function App() {
             step.infected.forEach(id => {
               newStates[id] = 'infected'
             })
+            if (step.exposed) {
+              step.exposed.forEach(id => {
+                newStates[id] = 'exposed'
+              })
+            }
             nodeStatesRef.current = newStates
             setLoading(false)
             setIsPlaying(true)
@@ -134,7 +141,7 @@ function App() {
   const runSimulationHTTP = useCallback(async () => {
     try {
       const response = await fetch(
-        `http://localhost:8000/simulate?beta=${params.beta}&gamma_days=${params.gamma_days}&start_nodes=${params.start_nodes}`
+        `http://localhost:8000/simulate?beta=${params.beta}&gamma_days=${params.gamma_days}&incubation_days=${params.incubation_days}&start_nodes=${params.start_nodes}`
       )
       const data = await response.json()
       setSimulationData(data)
@@ -190,6 +197,12 @@ function App() {
     const timer = setTimeout(() => {
       const step = simulationData[currentStep]
 
+      if (step.new_exposed) {
+        step.new_exposed.forEach(id => {
+          nodeStatesRef.current[id] = 'exposed'
+        })
+      }
+
       if (step.new_infected) {
         step.new_infected.forEach(id => {
           nodeStatesRef.current[id] = 'infected'
@@ -220,13 +233,14 @@ function App() {
   ]
 
   const getStatistics = useCallback(() => {
-    if (!simulationData || currentStep === 0) return { susceptible: graphData?.nodes.length || 0, infected: 0, recovered: 0 }
+    if (!simulationData || currentStep === 0) return { susceptible: graphData?.nodes.length || 0, exposed: 0, infected: 0, recovered: 0 }
 
+    const exposed = Object.values(nodeStatesRef.current).filter(s => s === 'exposed').length
     const infected = Object.values(nodeStatesRef.current).filter(s => s === 'infected').length
     const recovered = Object.values(nodeStatesRef.current).filter(s => s === 'recovered').length
     const susceptible = Object.values(nodeStatesRef.current).filter(s => s === 'susceptible').length
 
-    return { susceptible, infected, recovered }
+    return { susceptible, exposed, infected, recovered }
   }, [simulationData, currentStep, graphData])
 
   return (
@@ -313,6 +327,13 @@ function App() {
                     Susceptible
                   </span>
                   <span className="font-bold text-emerald-400">{getStatistics().susceptible}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                    Exposed
+                  </span>
+                  <span className="font-bold text-amber-400">{getStatistics().exposed}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-2">

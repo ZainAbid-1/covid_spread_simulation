@@ -11,9 +11,11 @@ function Statistics({ simulationData, currentStep, totalNodes }) {
 
   const maxStep = Math.min(currentStep + 1, simulationData.length)
   const chartData = simulationData.slice(0, maxStep).map((step, index) => {
+    const exposed = step.total_exposed || (step.exposed ? step.exposed.length : 0)
     const infected = step.total_infected || (step.infected ? step.infected.length : 0)
     const recovered = step.total_recovered || (step.recovered ? step.recovered.length : 0)
-    const susceptible = totalNodes - infected - recovered
+    const susceptible = totalNodes - exposed - infected - recovered
+    const newExposures = step.new_exposed ? step.new_exposed.length : 0
     const newInfections = step.new_infected ? step.new_infected.length : 0
     const newRecoveries = step.new_recovered ? step.new_recovered.length : 0
     const activeInfections = infected - recovered
@@ -21,9 +23,11 @@ function Statistics({ simulationData, currentStep, totalNodes }) {
     return {
       step: index,
       susceptible,
+      exposed,
       infected,
       recovered,
       activeInfections,
+      newExposures,
       newInfections,
       newRecoveries,
       infectionRate: newInfections > 0 && susceptible > 0 ? ((newInfections / susceptible) * 100).toFixed(2) : 0,
@@ -31,7 +35,8 @@ function Statistics({ simulationData, currentStep, totalNodes }) {
     }
   })
 
-  const finalStats = chartData[chartData.length - 1] || { susceptible: totalNodes, infected: 0, recovered: 0 }
+  const finalStats = chartData[chartData.length - 1] || { susceptible: totalNodes, exposed: 0, infected: 0, recovered: 0 }
+  const peakExposed = Math.max(...chartData.map(d => d.exposed))
   const peakInfected = Math.max(...chartData.map(d => d.infected))
   const peakActiveInfections = Math.max(...chartData.map(d => d.activeInfections))
   const totalInfections = Math.max(...chartData.map(d => d.infected))
@@ -70,10 +75,18 @@ function Statistics({ simulationData, currentStep, totalNodes }) {
 
   return (
     <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <div className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 border border-emerald-500/30 rounded-lg p-4">
           <div className="text-xs text-emerald-400 mb-1 font-semibold">Total Nodes</div>
           <div className="text-2xl font-bold text-white">{totalNodes}</div>
+        </div>
+
+        <div className="bg-gradient-to-br from-amber-500/20 to-amber-500/5 border border-amber-500/30 rounded-lg p-4">
+          <div className="text-xs text-amber-400 mb-1 font-semibold">Peak Exposed</div>
+          <div className="text-2xl font-bold text-white">{peakExposed}</div>
+          <div className="text-xs text-slate-400 mt-1">
+            {((peakExposed / totalNodes) * 100).toFixed(1)}% of population
+          </div>
         </div>
 
         <div className="bg-gradient-to-br from-red-500/20 to-red-500/5 border border-red-500/30 rounded-lg p-4">
@@ -110,6 +123,10 @@ function Statistics({ simulationData, currentStep, totalNodes }) {
                 <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
                 <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
               </linearGradient>
+              <linearGradient id="colorExposed" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.8}/>
+                <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+              </linearGradient>
               <linearGradient id="colorInfected" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/>
                 <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
@@ -132,6 +149,15 @@ function Statistics({ simulationData, currentStep, totalNodes }) {
               fillOpacity={1}
               fill="url(#colorSusceptible)"
               name="Susceptible"
+            />
+            <Area
+              type="monotone"
+              dataKey="exposed"
+              stackId="1"
+              stroke="#f59e0b"
+              fillOpacity={1}
+              fill="url(#colorExposed)"
+              name="Exposed"
             />
             <Area
               type="monotone"

@@ -58,6 +58,29 @@ function ControlPanel({ params, setParams, onRunSimulation, loading }) {
 
         <div>
           <label className="block text-sm font-medium mb-2 text-slate-300">
+            Incubation Period (σ)
+          </label>
+          <input
+            type="range"
+            min="0"
+            max="21"
+            step="1"
+            value={params.incubation_days}
+            onChange={(e) => handleChange('incubation_days', e.target.value)}
+            className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+          />
+          <div className="flex justify-between text-xs text-slate-400 mt-1">
+            <span>0</span>
+            <span className="font-bold text-amber-400">{params.incubation_days} days (avg)</span>
+            <span>21</span>
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            Mean incubation period before becoming infectious (±20% variation)
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-2 text-slate-300">
             Initial Infections
           </label>
           <input
