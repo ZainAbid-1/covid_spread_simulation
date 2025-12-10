@@ -1,6 +1,6 @@
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
-function Statistics({ simulationData, currentStep, totalNodes }) {
+function Statistics({ simulationData, currentStep, totalNodes, isMeaslesMode = false }) {
   if (!simulationData || simulationData.length === 0) {
     return (
       <div className="flex items-center justify-center h-96 text-slate-400">
@@ -10,7 +10,21 @@ function Statistics({ simulationData, currentStep, totalNodes }) {
   }
 
   const maxStep = Math.min(currentStep + 1, simulationData.length)
-  const chartData = simulationData.slice(0, maxStep).map((step, index) => {
+  const rawData = simulationData.slice(0, maxStep)
+  
+  const MAX_CHART_POINTS = 200
+  let downsampledData = rawData
+  
+  if (rawData.length > MAX_CHART_POINTS) {
+    const skip = Math.ceil(rawData.length / MAX_CHART_POINTS)
+    downsampledData = rawData.filter((_, index) => index % skip === 0)
+    
+    if (downsampledData[downsampledData.length - 1] !== rawData[rawData.length - 1]) {
+      downsampledData.push(rawData[rawData.length - 1])
+    }
+  }
+  
+  const chartData = downsampledData.map((step, index) => {
     const exposed = step.total_exposed || (step.exposed ? step.exposed.length : 0)
     const infected = step.total_infected || (step.infected ? step.infected.length : 0)
     const recovered = step.total_recovered || (step.recovered ? step.recovered.length : 0)
@@ -19,9 +33,14 @@ function Statistics({ simulationData, currentStep, totalNodes }) {
     const newInfections = step.new_infected ? step.new_infected.length : 0
     const newRecoveries = step.new_recovered ? step.new_recovered.length : 0
     const activeInfections = infected - recovered
+    
+    const contactInfections = step.new_infections ? step.new_infections.filter(i => i.method === 'contact').length : 0
+    const airborneInfections = step.new_infections ? step.new_infections.filter(i => i.method === 'airborne').length : 0
+    const avgAqi = step.stats ? step.stats.avg_aqi || 0 : 0
+    const contaminatedZones = step.stats ? step.stats.contaminated_zones || 0 : 0
 
     return {
-      step: index,
+      step: simulationData.indexOf(step),
       susceptible,
       exposed,
       infected,
@@ -30,6 +49,10 @@ function Statistics({ simulationData, currentStep, totalNodes }) {
       newExposures,
       newInfections,
       newRecoveries,
+      contactInfections,
+      airborneInfections,
+      avgAqi,
+      contaminatedZones,
       infectionRate: newInfections > 0 && susceptible > 0 ? ((newInfections / susceptible) * 100).toFixed(2) : 0,
       time: step.time
     }
@@ -73,46 +96,149 @@ function Statistics({ simulationData, currentStep, totalNodes }) {
     return null
   }
 
+  const peakAqi = isMeaslesMode ? Math.max(...chartData.map(d => d.avgAqi || 0)) : 0
+  const totalContactInfections = isMeaslesMode ? chartData.reduce((sum, d) => sum + (d.contactInfections || 0), 0) : 0
+  const totalAirborneInfections = isMeaslesMode ? chartData.reduce((sum, d) => sum + (d.airborneInfections || 0), 0) : 0
+
   return (
-    <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2">
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 border border-emerald-500/30 rounded-lg p-4">
-          <div className="text-xs text-emerald-400 mb-1 font-semibold">Total Nodes</div>
-          <div className="text-2xl font-bold text-white">{totalNodes}</div>
-        </div>
+    <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2">
+      {isMeaslesMode ? (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="bg-gradient-to-br from-orange-500/20 to-orange-500/5 border border-orange-500/30 rounded-lg p-3">
+              <div className="text-xs text-orange-400 mb-1 font-semibold">Peak Air Quality Index</div>
+              <div className="text-xl font-bold text-white">{peakAqi.toFixed(1)}</div>
+            </div>
 
-        <div className="bg-gradient-to-br from-amber-500/20 to-amber-500/5 border border-amber-500/30 rounded-lg p-4">
-          <div className="text-xs text-amber-400 mb-1 font-semibold">Peak Exposed</div>
-          <div className="text-2xl font-bold text-white">{peakExposed}</div>
-          <div className="text-xs text-slate-400 mt-1">
-            {((peakExposed / totalNodes) * 100).toFixed(1)}% of population
-          </div>
-        </div>
+            <div className="bg-gradient-to-br from-purple-500/20 to-purple-500/5 border border-purple-500/30 rounded-lg p-3">
+              <div className="text-xs text-purple-400 mb-1 font-semibold">Contact Infections</div>
+              <div className="text-xl font-bold text-white">{totalContactInfections}</div>
+            </div>
 
-        <div className="bg-gradient-to-br from-red-500/20 to-red-500/5 border border-red-500/30 rounded-lg p-4">
-          <div className="text-xs text-red-400 mb-1 font-semibold">Peak Infected</div>
-          <div className="text-2xl font-bold text-white">{peakInfected}</div>
-          <div className="text-xs text-slate-400 mt-1">
-            {((peakInfected / totalNodes) * 100).toFixed(1)}% of population
-          </div>
-        </div>
+            <div className="bg-gradient-to-br from-pink-500/20 to-pink-500/5 border border-pink-500/30 rounded-lg p-3">
+              <div className="text-xs text-pink-400 mb-1 font-semibold">Airborne Infections</div>
+              <div className="text-xl font-bold text-white">{totalAirborneInfections}</div>
+            </div>
 
-        <div className="bg-gradient-to-br from-blue-500/20 to-blue-500/5 border border-blue-500/30 rounded-lg p-4">
-          <div className="text-xs text-blue-400 mb-1 font-semibold">Final Recovered</div>
-          <div className="text-2xl font-bold text-white">{finalStats.recovered}</div>
-          <div className="text-xs text-slate-400 mt-1">
-            {((finalStats.recovered / totalNodes) * 100).toFixed(1)}% of population
+            <div className="bg-gradient-to-br from-cyan-500/20 to-cyan-500/5 border border-cyan-500/30 rounded-lg p-3">
+              <div className="text-xs text-cyan-400 mb-1 font-semibold">Airborne Ratio</div>
+              <div className="text-xl font-bold text-white">
+                {totalContactInfections + totalAirborneInfections > 0 
+                  ? ((totalAirborneInfections / (totalContactInfections + totalAirborneInfections)) * 100).toFixed(0) 
+                  : 0}%
+              </div>
+            </div>
           </div>
-        </div>
 
-        <div className="bg-gradient-to-br from-orange-500/20 to-orange-500/5 border border-orange-500/30 rounded-lg p-4">
-          <div className="text-xs text-orange-400 mb-1 font-semibold">Reproduction Rate</div>
-          <div className="text-2xl font-bold text-white">{reproductionRate}</div>
-          <div className="text-xs text-slate-400 mt-1">
-            R₀ (Basic reproduction number)
+          <div className="bg-slate-900 rounded-lg p-4">
+            <h3 className="text-sm font-semibold mb-2 text-slate-200">Air Quality Index Over Time</h3>
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={chartData}>
+                <defs>
+                  <linearGradient id="colorAqi" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="step" stroke="#94a3b8" style={{ fontSize: '10px' }} />
+                <YAxis stroke="#94a3b8" style={{ fontSize: '10px' }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Line
+                  type="monotone"
+                  dataKey="avgAqi"
+                  stroke="#f97316"
+                  strokeWidth={2}
+                  dot={false}
+                  name="Avg AQI"
+                />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
-        </div>
-      </div>
+
+          <div className="bg-slate-900 rounded-lg p-4">
+            <h3 className="text-sm font-semibold mb-2 text-slate-200">Transmission Vector Breakdown</h3>
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={chartData}>
+                <defs>
+                  <linearGradient id="colorContact" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#a855f7" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorAirborne" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ec4899" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#ec4899" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="step" stroke="#94a3b8" style={{ fontSize: '10px' }} />
+                <YAxis stroke="#94a3b8" style={{ fontSize: '10px' }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend wrapperStyle={{ fontSize: '10px' }} iconType="circle" />
+                <Area
+                  type="monotone"
+                  dataKey="contactInfections"
+                  stackId="1"
+                  stroke="#a855f7"
+                  fillOpacity={1}
+                  fill="url(#colorContact)"
+                  name="Contact"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="airborneInfections"
+                  stackId="1"
+                  stroke="#ec4899"
+                  fillOpacity={1}
+                  fill="url(#colorAirborne)"
+                  name="Airborne"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 border border-emerald-500/30 rounded-lg p-4">
+              <div className="text-xs text-emerald-400 mb-1 font-semibold">Total Nodes</div>
+              <div className="text-2xl font-bold text-white">{totalNodes}</div>
+            </div>
+
+            <div className="bg-gradient-to-br from-amber-500/20 to-amber-500/5 border border-amber-500/30 rounded-lg p-4">
+              <div className="text-xs text-amber-400 mb-1 font-semibold">Peak Exposed</div>
+              <div className="text-2xl font-bold text-white">{peakExposed}</div>
+              <div className="text-xs text-slate-400 mt-1">
+                {((peakExposed / totalNodes) * 100).toFixed(1)}% of population
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-red-500/20 to-red-500/5 border border-red-500/30 rounded-lg p-4">
+              <div className="text-xs text-red-400 mb-1 font-semibold">Peak Infected</div>
+              <div className="text-2xl font-bold text-white">{peakInfected}</div>
+              <div className="text-xs text-slate-400 mt-1">
+                {((peakInfected / totalNodes) * 100).toFixed(1)}% of population
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-blue-500/20 to-blue-500/5 border border-blue-500/30 rounded-lg p-4">
+              <div className="text-xs text-blue-400 mb-1 font-semibold">Final Recovered</div>
+              <div className="text-2xl font-bold text-white">{finalStats.recovered}</div>
+              <div className="text-xs text-slate-400 mt-1">
+                {((finalStats.recovered / totalNodes) * 100).toFixed(1)}% of population
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-orange-500/20 to-orange-500/5 border border-orange-500/30 rounded-lg p-4">
+              <div className="text-xs text-orange-400 mb-1 font-semibold">Reproduction Rate</div>
+              <div className="text-2xl font-bold text-white">{reproductionRate}</div>
+              <div className="text-xs text-slate-400 mt-1">
+                R₀ (Basic reproduction number)
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="bg-slate-900 rounded-lg p-6">
         <h3 className="text-lg font-semibold mb-4 text-slate-200">Population Over Time</h3>

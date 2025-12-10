@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { ZoomIn, ZoomOut, Maximize2, Target, Maximize } from 'lucide-react'
 import { QuadTree, Point, Rectangle } from '../utils/QuadTree'
 
-function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
+function CustomTownMap({ graphData, nodeStatesRef, zoneLoadsRef, isActive = true, isMeaslesMode = false }) {
   const baseLayerRef = useRef(null)
   const activeLayerRef = useRef(null)
+  const heatmapLayerRef = useRef(null)
   const containerRef = useRef(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 2 })
@@ -225,12 +226,72 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
     ctx.restore()
   }
 
+  const drawHeatmapLayer = () => {
+    if (!isMeaslesMode || !heatmapLayerRef.current || !zoneLoadsRef) return
+    
+    const canvas = heatmapLayerRef.current
+    const ctx = canvas.getContext('2d')
+    ctx.clearRect(0, 0, dimensions.width, dimensions.height)
+
+    ctx.save()
+    ctx.translate(transform.x, transform.y)
+    ctx.scale(transform.scale, transform.scale)
+
+    const nodes = scaledNodesRef.current
+    const zoneLoads = zoneLoadsRef.current || {}
+    
+    const communityNodes = {}
+    nodes.forEach(node => {
+      const comm = node.community || 0
+      if (!communityNodes[comm]) {
+        communityNodes[comm] = []
+      }
+      communityNodes[comm].push(node)
+    })
+
+    ctx.globalCompositeOperation = 'lighter'
+
+    Object.keys(zoneLoads).forEach(zoneId => {
+      const load = zoneLoads[zoneId]
+      if (load <= 0.1) return
+
+      const zoneNodes = communityNodes[zoneId]
+      if (!zoneNodes || zoneNodes.length === 0) return
+
+      const centerX = zoneNodes.reduce((sum, n) => sum + n.screenX, 0) / zoneNodes.length
+      const centerY = zoneNodes.reduce((sum, n) => sum + n.screenY, 0) / zoneNodes.length
+      
+      const maxLoad = Math.max(...Object.values(zoneLoads))
+      const opacity = Math.min(load / maxLoad, 1) * 0.6
+      const radius = 150 + (load / maxLoad) * 100
+      
+      const pulse = Math.sin(animationTime.current * 0.02) * 20
+
+      const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius + pulse)
+      gradient.addColorStop(0, `rgba(255, 50, 50, ${opacity})`)
+      gradient.addColorStop(0.5, `rgba(255, 100, 50, ${opacity * 0.5})`)
+      gradient.addColorStop(1, 'rgba(255, 50, 50, 0)')
+
+      ctx.beginPath()
+      ctx.arc(centerX, centerY, radius + pulse, 0, 2 * Math.PI)
+      ctx.fillStyle = gradient
+      ctx.fill()
+    })
+
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.restore()
+  }
+
   const drawActiveLayer = () => {
     const canvas = activeLayerRef.current
     if (!canvas) return
 
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, dimensions.width, dimensions.height)
+
+    if (isMeaslesMode) {
+      drawHeatmapLayer()
+    }
 
     ctx.save()
     ctx.translate(transform.x, transform.y)
@@ -258,7 +319,7 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
       }
     }
 
-    if (activeLinks.length > 0) {
+    if (activeLinks.length > 0 && !isMeaslesMode) {
       ctx.strokeStyle = `rgba(239, 68, 68, ${0.4 + Math.sin(animationTime.current * 0.05) * 0.2})`
       ctx.lineWidth = 1.5 / transform.scale
       ctx.beginPath()
@@ -425,6 +486,15 @@ function CustomTownMap({ graphData, nodeStatesRef, isActive = true }) {
         className="absolute top-0 left-0"
         style={{ pointerEvents: 'none' }}
       />
+      {isMeaslesMode && (
+        <canvas
+          ref={heatmapLayerRef}
+          width={dimensions.width}
+          height={dimensions.height}
+          className="absolute top-0 left-0"
+          style={{ pointerEvents: 'none' }}
+        />
+      )}
       <canvas
         ref={activeLayerRef}
         width={dimensions.width}

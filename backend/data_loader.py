@@ -2,47 +2,61 @@ import pandas as pd
 import networkx as nx
 import glob
 import os
+import math
+import random as py_random
+import community.community_louvain as community_louvain
 from config import Config
 
 DATASET_PATH = os.path.join("..", "dataset")
 
+communities = {}
+
 def compute_graph_layout(G):
     """
-    Computes an optimized graph layout based on graph size.
-    For very large graphs (>5000 nodes), uses random layout (instant).
-    For smaller graphs, uses spring layout with minimal iterations.
+    Computes an "Archipelago" layout with distinct districts (communities).
+    Uses Louvain community detection to group nodes into islands.
     """
+    global communities
+    
     graph_size = len(G.nodes())
     settings = Config.get_layout_settings(graph_size)
     
     print(f"📊 Graph size: {graph_size} nodes")
-    print(f"🎯 Using {settings['algorithm']} layout algorithm")
+    print(f"🎯 Detecting communities for Archipelago layout...")
     
-    if settings["algorithm"] == "random":
-        pos = nx.random_layout(G, seed=42)
-    elif settings["algorithm"] == "circular":
-        pos = nx.circular_layout(G)
-    elif settings["algorithm"] == "spring_fast":
-        pos = nx.spring_layout(
-            G, 
-            k=settings.get("k", 2.0),
-            iterations=settings["iterations"],
-            seed=42
-        )
-    elif settings["algorithm"] == "spring_optimized":
-        pos = nx.spring_layout(
-            G, 
-            k=settings.get("k", 0.15),
-            iterations=settings["iterations"],
-            seed=42
-        )
-    else:
-        pos = nx.spring_layout(
-            G,
-            k=settings.get("k", 0.15),
-            iterations=settings["iterations"],
-            seed=42
-        )
+    communities = community_louvain.best_partition(G)
+    num_communities = len(set(communities.values()))
+    
+    print(f"🏝️ Found {num_communities} districts (communities)")
+    
+    community_centers = {}
+    radius = 2500
+    
+    for i, comm_id in enumerate(set(communities.values())):
+        angle = 2 * math.pi * i / num_communities
+        center_x = radius * math.cos(angle)
+        center_y = radius * math.sin(angle)
+        community_centers[comm_id] = (center_x, center_y)
+    
+    initial_pos = {}
+    for node, comm_id in communities.items():
+        center_x, center_y = community_centers[comm_id]
+        noise_x = py_random.uniform(-200, 200)
+        noise_y = py_random.uniform(-200, 200)
+        initial_pos[node] = (center_x + noise_x, center_y + noise_y)
+    
+    print(f"🎨 Applying constrained spring layout with high repulsion (k={settings.get('k', 2.0)})...")
+    
+    pos = nx.spring_layout(
+        G,
+        pos=initial_pos,
+        k=settings.get("k", 2.0),
+        iterations=settings["iterations"],
+        seed=42
+    )
+    
+    for node in pos:
+        pos[node] = (pos[node][0] * 1000, pos[node][1] * 1000)
     
     return pos
 

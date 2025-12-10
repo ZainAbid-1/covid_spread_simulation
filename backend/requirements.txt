@@ -6,3 +6,5 @@ numpy
 networkx
 scipy
 python-dotenv
+python-louvain>=0.16
+scikit-learn>=1.0

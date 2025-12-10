@@ -2,13 +2,15 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { ZoomIn, ZoomOut, Maximize2, Target, Maximize } from 'lucide-react'
 
-function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
+function NetworkGraphOptimized({ graphData, nodeStatesRef, simulationData, currentStep, isActive = true, isMeaslesMode = false }) {
   const graphRef = useRef()
   const containerRef = useRef()
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [isFullscreen, setIsFullscreen] = useState(false)
   const animationFrameRef = useRef(null)
   const resizeTimerRef = useRef(null)
+  const recentEventsRef = useRef([])
+  const communityPositionsRef = useRef({})
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -47,6 +49,57 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
       }, 500)
     }
   }, [graphData])
+
+  useMemo(() => {
+    if (!graphData || !isMeaslesMode) return {}
+    
+    const communityNodes = {}
+    graphData.nodes.forEach(node => {
+      const comm = node.community || 0
+      if (!communityNodes[comm]) {
+        communityNodes[comm] = []
+      }
+      communityNodes[comm].push(node)
+    })
+
+    const centers = {}
+    Object.keys(communityNodes).forEach(commId => {
+      const nodes = communityNodes[commId]
+      const centerX = nodes.reduce((sum, n) => sum + n.x, 0) / nodes.length
+      const centerY = nodes.reduce((sum, n) => sum + n.y, 0) / nodes.length
+      centers[commId] = { x: centerX, y: centerY }
+    })
+
+    communityPositionsRef.current = centers
+    return centers
+  }, [graphData, isMeaslesMode])
+
+  useEffect(() => {
+    if (!isMeaslesMode || !simulationData || currentStep === 0) {
+      recentEventsRef.current = []
+      return
+    }
+
+    const TRACKING_WINDOW = 5
+    const startIdx = Math.max(0, currentStep - TRACKING_WINDOW)
+    const recentSteps = simulationData.slice(startIdx, currentStep)
+    
+    const events = []
+    recentSteps.forEach((step, idx) => {
+      const stepAge = currentStep - (startIdx + idx)
+      if (step.new_infections) {
+        step.new_infections.forEach(infection => {
+          events.push({
+            ...infection,
+            stepAge,
+            timestamp: Date.now() - (stepAge * 100)
+          })
+        })
+      }
+    })
+
+    recentEventsRef.current = events
+  }, [simulationData, currentStep, isMeaslesMode])
 
   const getNodeColor = useCallback((node) => {
     const state = nodeStatesRef.current[node.id] || 'susceptible'
@@ -201,6 +254,19 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
     const sourceId = typeof link.source === 'object' ? link.source.id : link.source
     const targetId = typeof link.target === 'object' ? link.target.id : link.target
     
+    if (isMeaslesMode) {
+      const recentContact = recentEventsRef.current.find(
+        e => e.method === 'contact' && 
+        ((e.source === sourceId && e.id === targetId) || (e.source === targetId && e.id === sourceId))
+      )
+      
+      if (recentContact) {
+        const age = recentContact.stepAge
+        const widthMultiplier = Math.max(0.5, 1 - (age / 5))
+        return 2.5 * widthMultiplier
+      }
+    }
+    
     const sourceState = nodeStatesRef.current[sourceId]
     const targetState = nodeStatesRef.current[targetId]
     
@@ -209,11 +275,25 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
       return 1.5
     }
     return 0.4
-  }, [nodeStatesRef])
+  }, [nodeStatesRef, isMeaslesMode])
 
   const getLinkColor = useCallback((link) => {
     const sourceId = typeof link.source === 'object' ? link.source.id : link.source
     const targetId = typeof link.target === 'object' ? link.target.id : link.target
+    
+    if (isMeaslesMode) {
+      const recentContact = recentEventsRef.current.find(
+        e => e.method === 'contact' && 
+        ((e.source === sourceId && e.id === targetId) || (e.source === targetId && e.id === sourceId))
+      )
+      
+      if (recentContact) {
+        const age = recentContact.stepAge
+        const opacity = Math.max(0, 1 - (age / 5))
+        const flash = Math.sin(Date.now() * 0.01) * 0.3 + 0.7
+        return `rgba(234, 179, 8, ${opacity * flash})`
+      }
+    }
     
     const sourceState = nodeStatesRef.current[sourceId]
     const targetState = nodeStatesRef.current[targetId]
@@ -223,7 +303,55 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
       return 'rgba(239, 68, 68, 0.6)'
     }
     return '#334155'
-  }, [nodeStatesRef])
+  }, [nodeStatesRef, isMeaslesMode])
+
+  const drawAirborneInfectionLines = useCallback((node, ctx, globalScale) => {
+    if (!isMeaslesMode || !recentEventsRef.current) return
+
+    const airborneEvents = recentEventsRef.current.filter(
+      e => e.method === 'airborne' && e.id === node.id
+    )
+
+    airborneEvents.forEach(event => {
+      const center = communityPositionsRef.current[event.zone]
+      if (!center) return
+
+      const age = event.stepAge
+      const opacity = Math.max(0, 1 - (age / 5))
+      
+      ctx.save()
+      ctx.globalAlpha = opacity
+      ctx.strokeStyle = '#ef4444'
+      ctx.lineWidth = 2 / globalScale
+      ctx.setLineDash([5 / globalScale, 5 / globalScale])
+      
+      ctx.beginPath()
+      ctx.moveTo(node.x, node.y)
+      ctx.lineTo(center.x, center.y)
+      ctx.stroke()
+      
+      const arrowSize = 8 / globalScale
+      const angle = Math.atan2(node.y - center.y, node.x - center.x)
+      const arrowX = node.x - arrowSize * Math.cos(angle)
+      const arrowY = node.y - arrowSize * Math.sin(angle)
+      
+      ctx.fillStyle = '#ef4444'
+      ctx.beginPath()
+      ctx.moveTo(node.x, node.y)
+      ctx.lineTo(
+        arrowX - arrowSize * 0.5 * Math.cos(angle - Math.PI / 2),
+        arrowY - arrowSize * 0.5 * Math.sin(angle - Math.PI / 2)
+      )
+      ctx.lineTo(
+        arrowX - arrowSize * 0.5 * Math.cos(angle + Math.PI / 2),
+        arrowY - arrowSize * 0.5 * Math.sin(angle + Math.PI / 2)
+      )
+      ctx.closePath()
+      ctx.fill()
+      
+      ctx.restore()
+    })
+  }, [isMeaslesMode])
 
   return (
     <div ref={containerRef} id="graph-container" className="relative w-full h-full rounded-lg overflow-hidden" style={{ minHeight: '600px', backgroundColor: '#020617' }}>
@@ -236,6 +364,8 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
         nodeColor={getNodeColor}
         nodeRelSize={4}
         nodeCanvasObject={(node, ctx, globalScale) => {
+          drawAirborneInfectionLines(node, ctx, globalScale)
+          
           const state = nodeStatesRef.current[node.id] || 'susceptible'
           let baseSize = 5
           let color = '#10b981'
@@ -311,6 +441,21 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, isActive = true }) {
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#3b82f6' }}></div>
             <span className="text-slate-300">Recovered</span>
           </div>
+          {isMeaslesMode && (
+            <>
+              <div className="border-t border-slate-700 my-2"></div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-0.5" style={{ backgroundColor: '#eab308' }}></div>
+                <span className="text-slate-300">Contact Infection</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <svg width="24" height="4">
+                  <line x1="0" y1="2" x2="24" y2="2" stroke="#ef4444" strokeWidth="2" strokeDasharray="3,3" />
+                </svg>
+                <span className="text-slate-300">Airborne Infection</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

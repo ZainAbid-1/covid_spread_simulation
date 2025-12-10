@@ -4,30 +4,50 @@ import Statistics from './components/Statistics'
 import ControlPanel from './components/ControlPanel'
 import Timeline from './components/Timeline'
 import NetworkGraph from './components/NetworkGraphOptimized'
-import { Square, Pause, Activity, BarChart3, Map, Zap } from 'lucide-react'
+import { Square, Pause, Play, Wind, Zap } from 'lucide-react'
 
 function App() {
   const [graphData, setGraphData] = useState(null)
-  const [simulationData, setSimulationData] = useState(null)
+  
+  // We use Ref for data storage to avoid constant re-renders during streaming
+  const simulationDataRef = useRef([]) 
+  // We still need state to trigger UI updates for stats/timeline, but we'll throttle it
+  const [simulationData, setSimulationData] = useState([]) 
+  
   const [isPlaying, setIsPlaying] = useState(false)
+  const [isStreaming, setIsStreaming] = useState(false) // New: Tracks if WS is active
   const [currentStep, setCurrentStep] = useState(0)
+  
   const nodeStatesRef = useRef({})
-  const [loading, setLoading] = useState(true) 
-  const [activeTab, setActiveTab] = useState('map')
+  const zoneLoadsRef = useRef({})
+  
+  const [loading, setLoading] = useState(true)
+  const [viewMode, setViewMode] = useState('setup')
   const [playbackSpeed, setPlaybackSpeed] = useState(1)
+  const wsRef = useRef(null)
+  const lastStateUpdateRef = useRef(0)
+  
   const [params, setParams] = useState({
     beta: 0.2,
-    gamma_days: 2,
-    incubation_days: 3,
-    start_nodes: 5
+    gamma_days: 7,
+    incubation_days: 10,
+    start_nodes: 5,
+    ventilation_rate: 0.05,
+    shedding_rate: 10.0,
+    beta_air: 0.0001
   })
 
+  const [liveVentilation, setLiveVentilation] = useState(0.05)
+  const [airQuality, setAirQuality] = useState({ avg_aqi: 0, contaminated_zones: 0 })
+
+  // Enhanced Speed Options
   const speedOptions = [
-    { value: 0.5, label: '0.5x' },
     { value: 1, label: '1x' },
-    { value: 2, label: '2x' },
     { value: 5, label: '5x' },
-    { value: 10, label: '10x' }
+    { value: 10, label: '10x' },
+    { value: 20, label: '20x' },
+    { value: 50, label: '50x' },
+    { value: 100, label: 'MAX' }
   ]
 
   useEffect(() => {
@@ -39,13 +59,34 @@ function App() {
       setLoading(true)
       const response = await fetch('http://localhost:8000/graph-data')
       const data = await response.json()
-      setGraphData(data)
+      
+      const normalizedData = {
+        ...data,
+        nodes: data.nodes.map(node => ({
+          ...node,
+          id: typeof node.id === 'string' ? parseInt(node.id, 10) : node.id
+        })),
+        links: data.links.map(link => ({
+          ...link,
+          source: typeof link.source === 'string' ? parseInt(link.source, 10) : (typeof link.source === 'object' ? link.source.id : link.source),
+          target: typeof link.target === 'string' ? parseInt(link.target, 10) : (typeof link.target === 'object' ? link.target.id : link.target)
+        }))
+      }
+      
+      setGraphData(normalizedData)
 
       const initialStates = {}
-      data.nodes.forEach(node => {
+      normalizedData.nodes.forEach(node => {
         initialStates[node.id] = 'susceptible'
       })
       nodeStatesRef.current = initialStates
+      
+      const initialZones = {}
+      for (let i = 0; i < (normalizedData.num_communities || 0); i++) {
+        initialZones[i] = 0
+      }
+      zoneLoadsRef.current = initialZones
+      
       setLoading(false)
     } catch (error) {
       console.error('Error fetching graph data:', error)
@@ -55,124 +96,152 @@ function App() {
 
   const memoizedGraphData = useMemo(() => graphData, [graphData])
 
-  const runSimulation = useCallback(async (useWebSocket = true) => {
+  // Helper to apply a single simulation step to the Visual Refs
+  const applyStepToRefs = (step) => {
+    if (step.new_exposed) {
+      step.new_exposed.forEach(id => { 
+        const normalizedId = typeof id === 'string' ? parseInt(id, 10) : id
+        nodeStatesRef.current[normalizedId] = 'exposed' 
+      })
+    }
+    if (step.new_infected) {
+      step.new_infected.forEach(id => { 
+        const normalizedId = typeof id === 'string' ? parseInt(id, 10) : id
+        nodeStatesRef.current[normalizedId] = 'infected' 
+      })
+    }
+    if (step.new_recovered) {
+      step.new_recovered.forEach(id => { 
+        const normalizedId = typeof id === 'string' ? parseInt(id, 10) : id
+        nodeStatesRef.current[normalizedId] = 'recovered' 
+      })
+    }
+    if (step.zone_updates) {
+      zoneLoadsRef.current = { ...zoneLoadsRef.current, ...step.zone_updates }
+    }
+    if (step.stats) {
+      setAirQuality({
+        avg_aqi: step.stats.avg_aqi || 0,
+        contaminated_zones: step.stats.contaminated_zones || 0
+      })
+    }
+  }
+
+  const runSimulation = useCallback(async () => {
     try {
       setLoading(true)
+      simulationDataRef.current = []
       setSimulationData([])
       setCurrentStep(0)
-      setIsPlaying(false)
+      setIsPlaying(true)
+      setIsStreaming(true)
 
+      // Reset Visuals
       const resetStates = {}
-      graphData?.nodes.forEach(node => {
-        resetStates[node.id] = 'susceptible'
-      })
+      graphData?.nodes.forEach(node => { resetStates[node.id] = 'susceptible' })
       nodeStatesRef.current = resetStates
 
-      if (useWebSocket) {
-        const ws = new WebSocket('ws://localhost:8000/ws/simulate')
-        const streamedData = []
+      const resetZones = {}
+      for (let i = 0; i < (graphData?.num_communities || 0); i++) { resetZones[i] = 0 }
+      zoneLoadsRef.current = resetZones
 
-        ws.onopen = () => {
-          ws.send(JSON.stringify({
-            beta: params.beta,
-            gamma_days: params.gamma_days,
-            incubation_days: params.incubation_days,
-            start_nodes: params.start_nodes
-          }))
-        }
+      if (wsRef.current) wsRef.current.close()
 
-        ws.onmessage = (event) => {
-          const step = JSON.parse(event.data)
-          
-          if (step.done) {
-            ws.close()
-            console.log(`✅ Received ${streamedData.length} simulation steps via WebSocket`)
-            return
-          }
+      const ws = new WebSocket('ws://localhost:8000/ws/simulate-measles')
+      wsRef.current = ws
 
-          if (step.error) {
-            console.error('Simulation error:', step.error)
-            ws.close()
-            setLoading(false)
-            return
-          }
-
-          streamedData.push(step)
-          setSimulationData([...streamedData])
-
-          if (streamedData.length === 1 && step.infected) {
-            const newStates = { ...resetStates }
-            step.infected.forEach(id => {
-              newStates[id] = 'infected'
-            })
-            if (step.exposed) {
-              step.exposed.forEach(id => {
-                newStates[id] = 'exposed'
-              })
-            }
-            nodeStatesRef.current = newStates
-            setLoading(false)
-            setIsPlaying(true)
-          }
-        }
-
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
-          console.log('Falling back to HTTP endpoint...')
-          ws.close()
-          runSimulationHTTP()
-        }
-
-        ws.onclose = () => {
-          if (streamedData.length === 0) {
-            console.log('WebSocket closed prematurely, using HTTP fallback')
-            runSimulationHTTP()
-          }
-        }
-      } else {
-        await runSimulationHTTP()
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ ...params }))
       }
+
+      ws.onmessage = (event) => {
+        const step = JSON.parse(event.data)
+        
+        if (step.done) {
+          ws.close()
+          setIsStreaming(false)
+          // Sync final state
+          setSimulationData([...simulationDataRef.current])
+          console.log(`✅ Simulation finished: ${simulationDataRef.current.length} steps`)
+          return
+        }
+
+        if (step.error) {
+          console.error('Simulation error:', step.error)
+          ws.close()
+          setLoading(false)
+          setViewMode('setup')
+          return
+        }
+
+        // 1. Store Data in Ref (Fast)
+        simulationDataRef.current.push(step)
+
+        // 2. LIVE MODE: Directly update visuals without waiting for React Cycle
+        applyStepToRefs(step)
+
+        // 3. Update Progress Counters (Throttled slightly for performance if needed, but we do it live here)
+        setCurrentStep(prev => prev + 1)
+
+        // 4. Initial Setup Transition
+        if (simulationDataRef.current.length === 1) {
+          if (step.infected) {
+             step.infected.forEach(id => {
+               const normalizedId = typeof id === 'string' ? parseInt(id, 10) : id
+               nodeStatesRef.current[normalizedId] = 'infected'
+             })
+          }
+          setLoading(false)
+          setViewMode('running')
+        }
+        
+        // 5. Aggressive Throttle: Update React State every 100 steps OR every 100ms (whichever comes first)
+        const now = Date.now()
+        const shouldUpdateByStep = simulationDataRef.current.length % 100 === 0
+        const shouldUpdateByTime = (now - lastStateUpdateRef.current) >= 100
+        
+        if (shouldUpdateByStep || shouldUpdateByTime) {
+            setSimulationData([...simulationDataRef.current])
+            lastStateUpdateRef.current = now
+        }
+      }
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error)
+        ws.close()
+        setLoading(false)
+        setViewMode('setup')
+      }
+
     } catch (error) {
       console.error('Error running simulation:', error)
       setLoading(false)
     }
   }, [params, graphData])
 
-  const runSimulationHTTP = useCallback(async () => {
-    try {
-      const response = await fetch(
-        `http://localhost:8000/simulate?beta=${params.beta}&gamma_days=${params.gamma_days}&incubation_days=${params.incubation_days}&start_nodes=${params.start_nodes}`
-      )
-      const data = await response.json()
-      setSimulationData(data)
-
-      if (data.length > 0 && data[0].infected) {
-        const newStates = {}
-        graphData?.nodes.forEach(node => {
-          newStates[node.id] = 'susceptible'
-        })
-        data[0].infected.forEach(id => {
-          newStates[id] = 'infected'
-        })
-        nodeStatesRef.current = newStates
-      }
-
-      setLoading(false)
-      setIsPlaying(true)
-    } catch (error) {
-      console.error('Error with HTTP simulation:', error)
-      setLoading(false)
-    }
-  }, [params, graphData])
-
   const stopSimulation = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
+    
     setIsPlaying(false)
+    setIsStreaming(false)
     setCurrentStep(0)
+    setViewMode('setup')
+    
+    // Reset Everything
     const resetStates = {}
-    graphData?.nodes.forEach(node => {
-      resetStates[node.id] = 'susceptible'
-    })
+    graphData?.nodes.forEach(node => { resetStates[node.id] = 'susceptible' })
     nodeStatesRef.current = resetStates
+    
+    const resetZones = {}
+    for (let i = 0; i < (graphData?.num_communities || 0); i++) { resetZones[i] = 0 }
+    zoneLoadsRef.current = resetZones
+    
+    setAirQuality({ avg_aqi: 0, contaminated_zones: 0 })
+    simulationDataRef.current = []
+    setSimulationData([])
   }, [graphData])
 
   const pauseSimulation = useCallback(() => {
@@ -180,247 +249,290 @@ function App() {
   }, [])
 
   const resumeSimulation = useCallback(() => {
-    if (currentStep < simulationData?.length) {
+    if (currentStep < simulationDataRef.current.length) {
       setIsPlaying(true)
     }
-  }, [currentStep, simulationData])
+  }, [currentStep])
 
+  // REPLAY LOGIC: Only active when NOT streaming from WebSocket (i.e. Review Mode)
   useEffect(() => {
-    if (!isPlaying || !simulationData || simulationData.length === 0) {
+    if (!isPlaying || isStreaming || simulationDataRef.current.length === 0) {
       return
     }
 
-    if (currentStep >= simulationData.length) {
+    if (currentStep >= simulationDataRef.current.length - 1) {
+      setIsPlaying(false)
       return
     }
+
+    // SPEED LOGIC:
+    // If speed > 10, we process multiple steps per frame (Step Jumping)
+    // This allows speeds like 50x or 100x without browser lag
+    const stepsPerFrame = playbackSpeed > 10 ? Math.ceil(playbackSpeed / 5) : 1
+    const delay = playbackSpeed > 10 ? 16 : (100 / playbackSpeed) // Cap at 60fps (16ms)
 
     const timer = setTimeout(() => {
-      const step = simulationData[currentStep]
-
-      if (step.new_exposed) {
-        step.new_exposed.forEach(id => {
-          nodeStatesRef.current[id] = 'exposed'
-        })
+      let nextStep = currentStep
+      
+      // Process batch of steps
+      for (let i = 0; i < stepsPerFrame; i++) {
+        if (nextStep >= simulationDataRef.current.length) break;
+        
+        const step = simulationDataRef.current[nextStep]
+        applyStepToRefs(step) // Update visuals
+        nextStep++
       }
 
-      if (step.new_infected) {
-        step.new_infected.forEach(id => {
-          nodeStatesRef.current[id] = 'infected'
-        })
-      }
-
-      if (step.new_recovered) {
-        step.new_recovered.forEach(id => {
-          nodeStatesRef.current[id] = 'recovered'
-        })
-      }
-
-      setCurrentStep(prev => prev + 1)
-    }, 100 / playbackSpeed)
+      setCurrentStep(nextStep)
+    }, delay)
 
     return () => clearTimeout(timer)
-  }, [isPlaying, currentStep, simulationData, playbackSpeed])
-
-
-
-
-
-  const tabs = [
-    { id: 'map', label: 'Town View', icon: Map },
-    { id: 'network', label: 'Network Graph', icon: Zap },
-    { id: 'statistics', label: 'Statistics', icon: BarChart3 },
-    { id: 'timeline', label: 'Timeline', icon: Activity }
-  ]
+  }, [isPlaying, isStreaming, currentStep, playbackSpeed])
 
   const getStatistics = useCallback(() => {
-    if (!simulationData || currentStep === 0) return { susceptible: graphData?.nodes.length || 0, exposed: 0, infected: 0, recovered: 0 }
-
-    const exposed = Object.values(nodeStatesRef.current).filter(s => s === 'exposed').length
+    if (!graphData || !graphData.nodes || graphData.nodes.length === 0) {
+      return {
+        susceptible: 0,
+        exposed: 0,
+        infected: 0,
+        recovered: 0
+      }
+    }
+    
+    const total = graphData.nodes.length
     const infected = Object.values(nodeStatesRef.current).filter(s => s === 'infected').length
+    const exposed = Object.values(nodeStatesRef.current).filter(s => s === 'exposed').length
     const recovered = Object.values(nodeStatesRef.current).filter(s => s === 'recovered').length
-    const susceptible = Object.values(nodeStatesRef.current).filter(s => s === 'susceptible').length
+    
+    return {
+      susceptible: Math.max(0, total - infected - exposed - recovered),
+      exposed,
+      infected,
+      recovered
+    }
+  }, [graphData, currentStep]) // Depend on currentStep to force refresh
 
-    return { susceptible, exposed, infected, recovered }
-  }, [simulationData, currentStep, graphData])
+  // ... (View Mode Setup is same as before) ...
+  if (viewMode === 'setup') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white flex items-center justify-center p-6">
+        <div className="w-full max-w-2xl">
+          <header className="mb-8 text-center">
+            <h1 className="text-5xl font-bold bg-gradient-to-r from-red-400 via-orange-400 to-yellow-400 bg-clip-text text-transparent mb-3">
+              The Invisible Cloud
+            </h1>
+            <p className="text-xl text-slate-400">Measles Airborne Transmission Simulation</p>
+            <p className="text-sm text-slate-500 mt-2">Spatially-Aware Environmental Memory Model</p>
+          </header>
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
-      <div className="container mx-auto px-4 py-6">
-        <header className="mb-8">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent mb-2">
-            Virus Spread Simulation
-          </h1>
-          <p className="text-slate-400">Real-time Virus Model Visualization</p>
-        </header>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          <div className="lg:col-span-1">
+          <div className="bg-slate-800/60 backdrop-blur-lg rounded-2xl p-8 border border-slate-700 shadow-2xl">
             <ControlPanel
               params={params}
               setParams={setParams}
               onRunSimulation={runSimulation}
               loading={loading}
+              isMeaslesMode={true}
             />
+          </div>
 
-            {simulationData && (
-              <div className="mt-6 bg-slate-800 rounded-lg p-6 border border-slate-700">
-                <h3 className="text-lg font-semibold mb-4">Playback Controls</h3>
-                <div className="flex gap-2 mb-4">
-                  {isPlaying ? (
-                    <button
-                      onClick={pauseSimulation}
-                      className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white font-semibold py-3 px-4 rounded-lg transition-all transform hover:scale-105"
-                    >
-                      <Pause size={20} />
-                      Pause
-                    </button>
-                  ) : (
-                    <button
-                      onClick={resumeSimulation}
-                      className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white font-semibold py-3 px-4 rounded-lg transition-all transform hover:scale-105"
-                    >
-                      <Pause size={20} />
-                      Resume
-                    </button>
-                  )}
-                  <button
-                    onClick={stopSimulation}
-                    className="flex items-center justify-center gap-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-3 px-4 rounded-lg transition-all"
-                  >
-                    <Square size={20} />
-                  </button>
-                </div>
-                
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-2 text-slate-300">
-                    Playback Speed
-                  </label>
-                  <div className="grid grid-cols-5 gap-2">
-                    {speedOptions.map(option => (
-                      <button
-                        key={option.value}
-                        onClick={() => setPlaybackSpeed(option.value)}
-                        className={`py-2 px-3 rounded-lg font-semibold text-sm transition-all ${
-                          playbackSpeed === option.value
-                            ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg scale-105'
-                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
+          {graphData && (
+            <div className="mt-6 text-center text-sm text-slate-400">
+              <p>Network loaded: <span className="text-emerald-400 font-semibold">{graphData.nodes.length}</span> individuals across <span className="text-cyan-400 font-semibold">{graphData.num_communities}</span> districts</p>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+      <div className="container mx-auto px-4 py-4">
+        <header className="mb-4 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-red-400 to-orange-400 bg-clip-text text-transparent">
+              COMMAND CENTER
+            </h1>
+            <p className="text-slate-400 text-sm">Measles Environmental Monitor {isStreaming && <span className="text-emerald-400 animate-pulse ml-2">● LIVE FEED</span>}</p>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            <div className="bg-slate-800 rounded-lg px-4 py-2 border border-slate-700">
+              <div className="text-xs text-slate-400 mb-1">Air Quality Index</div>
+              <div className="text-2xl font-bold text-orange-400">{airQuality.avg_aqi.toFixed(1)}</div>
+            </div>
+            
+            <div className="bg-slate-800 rounded-lg px-4 py-2 border border-slate-700">
+              <div className="text-xs text-slate-400 mb-1">Contaminated Zones</div>
+              <div className="text-2xl font-bold text-red-400">{airQuality.contaminated_zones}</div>
+            </div>
+            
+            <div className="bg-slate-800 rounded-lg px-4 py-2 border border-slate-700">
+              <div className="text-xs text-slate-400 mb-1">Active Cases</div>
+              <div className="text-2xl font-bold text-yellow-400">{getStatistics().infected}</div>
+            </div>
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="lg:col-span-6">
+            <div className="bg-slate-800 rounded-lg border border-slate-700 h-[600px] relative">
+              <div className="absolute top-0 left-0 right-0 bg-gradient-to-r from-red-500/20 to-orange-500/20 px-4 py-2 border-b border-slate-700 z-10">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-white uppercase tracking-wider text-sm">Environmental Monitor</h3>
+                  <div className="flex items-center gap-2">
+                    <Wind size={16} className="text-cyan-400" />
+                    <input
+                      type="range"
+                      min="0"
+                      max="0.5"
+                      step="0.01"
+                      value={liveVentilation}
+                      onChange={(e) => setLiveVentilation(parseFloat(e.target.value))}
+                      className="w-32 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                    />
+                    <span className="text-cyan-400 text-xs font-semibold w-12">{(liveVentilation * 100).toFixed(0)}%</span>
                   </div>
                 </div>
-
-                <div className="text-sm text-slate-400">
-                  Step: {currentStep} / {simulationData.length}
-                </div>
               </div>
-            )}
-
-            <div className="mt-6 bg-slate-800 rounded-lg p-6 border border-slate-700">
-              <h3 className="text-lg font-semibold mb-4">Current Status</h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-                    Susceptible
-                  </span>
-                  <span className="font-bold text-emerald-400">{getStatistics().susceptible}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-                    Exposed
-                  </span>
-                  <span className="font-bold text-amber-400">{getStatistics().exposed}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                    Infected
-                  </span>
-                  <span className="font-bold text-red-400">{getStatistics().infected}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                    Recovered
-                  </span>
-                  <span className="font-bold text-blue-400">{getStatistics().recovered}</span>
-                </div>
+              <div className="pt-12 h-full">
+                {!loading && memoizedGraphData && (
+                  <CustomTownMap
+                    graphData={memoizedGraphData}
+                    nodeStatesRef={nodeStatesRef}
+                    zoneLoadsRef={zoneLoadsRef}
+                    isActive={true}
+                    isMeaslesMode={true}
+                  />
+                )}
               </div>
             </div>
           </div>
 
-          <div className="lg:col-span-3">
-            <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
-              <div className="flex border-b border-slate-700">
-                {tabs.map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-2 px-6 py-4 font-semibold transition-all ${
-                      activeTab === tab.id
-                        ? 'bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 border-b-2 border-emerald-400 text-emerald-400'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-                    }`}
-                  >
-                    <tab.icon size={20} />
-                    {tab.label}
-                  </button>
-                ))}
+          <div className="lg:col-span-6">
+            <div className="bg-slate-800 rounded-lg border border-slate-700 h-[600px] relative">
+              <div className="absolute top-0 left-0 right-0 bg-gradient-to-r from-purple-500/20 to-pink-500/20 px-4 py-2 border-b border-slate-700 z-10">
+                <h3 className="font-bold text-white uppercase tracking-wider text-sm">Contact Tracing</h3>
               </div>
-
-              <div className="p-6 h-[600px] relative">
-                {loading && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-slate-800/50 backdrop-blur-sm z-50 rounded-lg">
-                    <div className="text-center">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-400 mx-auto mb-4"></div>
-                      <p className="text-slate-400">Loading simulation data...</p>
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === 'map' && !loading && memoizedGraphData && (
-                  <div className="h-full">
-                    <CustomTownMap
-                      graphData={memoizedGraphData}
-                      nodeStatesRef={nodeStatesRef}
-                      isActive={activeTab === 'map'}
-                    />
-                  </div>
-                )}
-
-                {activeTab === 'network' && !loading && memoizedGraphData && (
-                  <div className="h-full">
-                    <NetworkGraph
-                      graphData={memoizedGraphData}
-                      nodeStatesRef={nodeStatesRef}
-                      isActive={activeTab === 'network'}
-                    />
-                  </div>
-                )}
-
-                {activeTab === 'statistics' && !loading && simulationData && (
-                  <div className="h-full">
-                    <Statistics
-                      simulationData={simulationData}
-                      currentStep={currentStep}
-                      totalNodes={graphData?.nodes.length || 0}
-                    />
-                  </div>
-                )}
-
-                {activeTab === 'timeline' && !loading && simulationData && (
-                  <div className="h-full">
-                    <Timeline
-                      simulationData={simulationData}
-                      currentStep={currentStep}
-                    />
-                  </div>
+              <div className="pt-12 h-full">
+                {!loading && memoizedGraphData && (
+                  <NetworkGraph
+                    graphData={memoizedGraphData}
+                    nodeStatesRef={nodeStatesRef}
+                    simulationData={simulationData}
+                    currentStep={currentStep}
+                    isActive={true}
+                    isMeaslesMode={true}
+                  />
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* Stats and Timeline pass simulationData (State) so they might lag slightly behind the live graph, which is fine */}
+          <div className="lg:col-span-4">
+            <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 h-[400px] overflow-y-auto">
+              <h3 className="font-bold text-white uppercase tracking-wider text-sm mb-4">Event Timeline</h3>
+              <Timeline
+                simulationData={simulationData}
+                currentStep={currentStep}
+                isMeaslesMode={true}
+              />
+            </div>
+          </div>
+
+          <div className="lg:col-span-8">
+            <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 h-[400px] overflow-y-auto">
+              <h3 className="font-bold text-white uppercase tracking-wider text-sm mb-4">Analytics Dashboard</h3>
+              <Statistics
+                simulationData={simulationData}
+                currentStep={currentStep}
+                totalNodes={graphData?.nodes.length || 0}
+                isMeaslesMode={true}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 bg-slate-800 rounded-lg p-4 border border-slate-700 flex items-center justify-between">
+          <div className="flex gap-2">
+            {!isStreaming && (
+              isPlaying ? (
+                <button
+                  onClick={pauseSimulation}
+                  className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white font-semibold py-2 px-4 rounded-lg transition-all"
+                >
+                  <Pause size={18} />
+                  Pause Replay
+                </button>
+              ) : (
+                <button
+                  onClick={resumeSimulation}
+                  disabled={simulationDataRef.current.length === 0}
+                  className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white font-semibold py-2 px-4 rounded-lg transition-all disabled:opacity-50"
+                >
+                  <Play size={18} />
+                  Resume Replay
+                </button>
+              )
+            )}
+            
+            {isStreaming && (
+               <div className="flex items-center gap-2 bg-slate-700/50 text-slate-300 font-semibold py-2 px-4 rounded-lg border border-slate-600">
+                  <Zap size={18} className="text-yellow-400 animate-pulse" />
+                  Receiving Live Data...
+               </div>
+            )}
+
+            <button
+              onClick={stopSimulation}
+              className="flex items-center gap-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-all"
+            >
+              <Square size={18} />
+              Stop & Reset
+            </button>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="text-sm text-slate-400">
+              Step: {currentStep} / {simulationDataRef.current.length}
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-400">Replay Speed:</span>
+              {speedOptions.map(option => (
+                <button
+                  key={option.value}
+                  onClick={() => setPlaybackSpeed(option.value)}
+                  disabled={isStreaming}
+                  className={`py-1 px-3 rounded-lg font-semibold text-xs transition-all ${
+                    playbackSpeed === option.value
+                      ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600 disabled:opacity-30'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+              <span className="text-xs text-slate-300">S: {getStatistics().susceptible}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+              <span className="text-xs text-slate-300">E: {getStatistics().exposed}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <span className="text-xs text-slate-300">I: {getStatistics().infected}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+              <span className="text-xs text-slate-300">R: {getStatistics().recovered}</span>
             </div>
           </div>
         </div>
