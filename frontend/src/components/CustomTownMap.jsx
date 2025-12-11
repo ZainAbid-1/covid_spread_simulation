@@ -158,11 +158,38 @@ function CustomTownMap({ graphData, nodeStatesRef, zoneLoadsRef, isActive = true
     }
   }, [transform, isActive])
 
+  useEffect(() => {
+    const canvas = activeLayerRef.current
+    if (!canvas) return
+
+    const wheelHandler = (e) => {
+      e.preventDefault()
+      const delta = e.deltaY > 0 ? 0.92 : 1.08
+      const newScale = Math.max(0.5, Math.min(10, transform.scale * delta))
+      
+      const rect = canvas.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+      
+      const newX = x - (x - transform.x) * (newScale / transform.scale)
+      const newY = y - (y - transform.y) * (newScale / transform.scale)
+      
+      setTransform({ x: newX, y: newY, scale: newScale })
+    }
+
+    canvas.addEventListener('wheel', wheelHandler, { passive: false })
+    
+    return () => {
+      canvas.removeEventListener('wheel', wheelHandler)
+    }
+  }, [transform])
+
   const getNodeColor = (state) => {
     switch (state) {
       case 'exposed': return '#f59e0b'
       case 'infected': return '#ef4444'
       case 'recovered': return '#3b82f6'
+      case 'dead': return '#4b5563'
       default: return '#10b981'
     }
   }
@@ -251,9 +278,11 @@ function CustomTownMap({ graphData, nodeStatesRef, zoneLoadsRef, isActive = true
 
     ctx.globalCompositeOperation = 'lighter'
 
+    const FIXED_MAX_CAP = 1000.0
+
     Object.keys(zoneLoads).forEach(zoneId => {
       const load = zoneLoads[zoneId]
-      if (load <= 0.1) return
+      if (load < 1.0) return
 
       const zoneNodes = communityNodes[zoneId]
       if (!zoneNodes || zoneNodes.length === 0) return
@@ -261,9 +290,8 @@ function CustomTownMap({ graphData, nodeStatesRef, zoneLoadsRef, isActive = true
       const centerX = zoneNodes.reduce((sum, n) => sum + n.screenX, 0) / zoneNodes.length
       const centerY = zoneNodes.reduce((sum, n) => sum + n.screenY, 0) / zoneNodes.length
       
-      const maxLoad = Math.max(...Object.values(zoneLoads))
-      const opacity = Math.min(load / maxLoad, 1) * 0.6
-      const radius = 150 + (load / maxLoad) * 100
+      const opacity = Math.min(load / FIXED_MAX_CAP, 1) * 0.6
+      const radius = 150 + (load / FIXED_MAX_CAP) * 100
       
       const pulse = Math.sin(animationTime.current * 0.02) * 20
 
@@ -478,7 +506,7 @@ function CustomTownMap({ graphData, nodeStatesRef, zoneLoadsRef, isActive = true
   }
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-slate-900 rounded-lg overflow-hidden">
+    <div ref={containerRef} className="relative w-full h-full bg-slate-900 rounded-lg overflow-hidden" style={{ touchAction: 'none' }}>
       <canvas
         ref={baseLayerRef}
         width={dimensions.width}
@@ -499,7 +527,6 @@ function CustomTownMap({ graphData, nodeStatesRef, zoneLoadsRef, isActive = true
         ref={activeLayerRef}
         width={dimensions.width}
         height={dimensions.height}
-        onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -526,6 +553,10 @@ function CustomTownMap({ graphData, nodeStatesRef, zoneLoadsRef, isActive = true
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-blue-500"></div>
             <span className="text-slate-300">Recovered</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-slate-500"></div>
+            <span className="text-slate-300">Deceased</span>
           </div>
         </div>
       </div>

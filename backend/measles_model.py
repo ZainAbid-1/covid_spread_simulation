@@ -9,18 +9,20 @@ SUSCEPTIBLE = 0
 EXPOSED = 1
 INFECTIOUS = 2
 RECOVERED = 3
+DEAD = 4
 
 EVENT_BECOME_INFECTIOUS = 1
 EVENT_RECOVER = 2
 
 class MeaslesSimulation:
     def __init__(self, contacts_df, communities, transmission_prob=0.2, recovery_days=7, 
-                 incubation_days=10, ventilation_rate=None, shedding_rate=None, beta_air=None):
+                 incubation_days=10, ventilation_rate=None, shedding_rate=None, beta_air=None, mortality_rate=0.0):
         self.contacts_df = contacts_df
         self.communities = communities
         self.transmission_prob = transmission_prob
         self.recovery_days = recovery_days
         self.incubation_days = incubation_days
+        self.mortality_rate = mortality_rate
         
         self.ventilation_rate = ventilation_rate if ventilation_rate is not None else Config.MEASLES_VENTILATION_RATE
         self.shedding_rate = shedding_rate if shedding_rate is not None else Config.MEASLES_SHEDDING_RATE
@@ -68,6 +70,7 @@ class MeaslesSimulation:
         newly_exposed = []
         newly_infected = []
         newly_recovered = []
+        newly_dead = []
         
         for zone_id in self.zone_map:
             self.zone_map[zone_id] *= (1.0 - self.ventilation_rate)
@@ -90,8 +93,12 @@ class MeaslesSimulation:
             
             elif event_type == EVENT_RECOVER:
                 if self.node_states.get(node) == INFECTIOUS:
-                    self.node_states[node] = RECOVERED
-                    newly_recovered.append(int(node))
+                    if random.random() < self.mortality_rate:
+                        self.node_states[node] = DEAD
+                        newly_dead.append(int(node))
+                    else:
+                        self.node_states[node] = RECOVERED
+                        newly_recovered.append(int(node))
         
         for row in contact_group.itertuples():
             u, v = row.u, row.v
@@ -133,6 +140,7 @@ class MeaslesSimulation:
         current_exposed = len([n for n, s in self.node_states.items() if s == EXPOSED])
         current_infected = len([n for n, s in self.node_states.items() if s == INFECTIOUS])
         current_recovered = len([n for n, s in self.node_states.items() if s == RECOVERED])
+        current_dead = len([n for n, s in self.node_states.items() if s == DEAD])
         
         return {
             "time": int(timestamp),
@@ -140,6 +148,7 @@ class MeaslesSimulation:
             "new_exposed": newly_exposed,
             "new_infected": newly_infected,
             "new_recovered": newly_recovered,
+            "new_dead": newly_dead,
             "zone_updates": zone_updates,
             "stats": {
                 "avg_aqi": float(avg_aqi),
@@ -148,12 +157,13 @@ class MeaslesSimulation:
             },
             "total_exposed": current_exposed,
             "total_infected": current_infected,
-            "total_recovered": current_recovered
+            "total_recovered": current_recovered,
+            "total_dead": current_dead
         }
 
 def run_measles_simulation_generator(contacts_df, communities, patient_zero_count=5, 
                                       transmission_prob=0.2, recovery_days=7, incubation_days=10,
-                                      ventilation_rate=None, shedding_rate=None, beta_air=None):
+                                      ventilation_rate=None, shedding_rate=None, beta_air=None, mortality_rate=0.0):
     if contacts_df is None:
         yield {"error": "Data not loaded"}
         return
@@ -166,7 +176,8 @@ def run_measles_simulation_generator(contacts_df, communities, patient_zero_coun
         incubation_days=incubation_days,
         ventilation_rate=ventilation_rate,
         shedding_rate=shedding_rate,
-        beta_air=beta_air
+        beta_air=beta_air,
+        mortality_rate=mortality_rate
     )
     
     unique_nodes = pd.unique(contacts_df[['u', 'v']].values.ravel('K'))
@@ -190,7 +201,8 @@ def run_measles_simulation_generator(contacts_df, communities, patient_zero_coun
         "stats": {"avg_aqi": 0.0, "total_aqi": 0.0, "contaminated_zones": 0},
         "total_exposed": 0,
         "total_infected": len(initial_infected),
-        "total_recovered": 0
+        "total_recovered": 0,
+        "total_dead": 0
     }
     
     grouped = contacts_df.groupby('timestamp')
@@ -200,6 +212,22 @@ def run_measles_simulation_generator(contacts_df, communities, patient_zero_coun
         
         if (step_result["new_infections"] or 
             step_result["new_infected"] or 
+            step_result["new_recovered"] or
+            step_result["zone_updates"]):
+            yield step_result
+    
+    last_timestamp = contacts_df['timestamp'].iloc[-1]
+    time_step = 20
+    max_additional_steps = 1000
+    
+    for _ in range(max_additional_steps):
+        if not sim.event_queue:
+            break
+        
+        last_timestamp += time_step
+        step_result = sim.step(last_timestamp, pd.DataFrame(columns=['u', 'v']))
+        
+        if (step_result["new_infected"] or 
             step_result["new_recovered"] or
             step_result["zone_updates"]):
             yield step_result

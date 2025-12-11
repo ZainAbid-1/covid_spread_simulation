@@ -28,10 +28,12 @@ function Statistics({ simulationData, currentStep, totalNodes, isMeaslesMode = f
     const exposed = step.total_exposed || (step.exposed ? step.exposed.length : 0)
     const infected = step.total_infected || (step.infected ? step.infected.length : 0)
     const recovered = step.total_recovered || (step.recovered ? step.recovered.length : 0)
-    const susceptible = totalNodes - exposed - infected - recovered
+    const dead = step.total_dead || 0
+    const susceptible = totalNodes - exposed - infected - recovered - dead
     const newExposures = step.new_exposed ? step.new_exposed.length : 0
     const newInfections = step.new_infected ? step.new_infected.length : 0
     const newRecoveries = step.new_recovered ? step.new_recovered.length : 0
+    const newDeaths = step.new_dead ? step.new_dead.length : 0
     const activeInfections = infected - recovered
     
     const contactInfections = step.new_infections ? step.new_infections.filter(i => i.method === 'contact').length : 0
@@ -45,10 +47,12 @@ function Statistics({ simulationData, currentStep, totalNodes, isMeaslesMode = f
       exposed,
       infected,
       recovered,
+      dead,
       activeInfections,
       newExposures,
       newInfections,
       newRecoveries,
+      newDeaths,
       contactInfections,
       airborneInfections,
       avgAqi,
@@ -99,12 +103,13 @@ function Statistics({ simulationData, currentStep, totalNodes, isMeaslesMode = f
   const peakAqi = isMeaslesMode ? Math.max(...chartData.map(d => d.avgAqi || 0)) : 0
   const totalContactInfections = isMeaslesMode ? chartData.reduce((sum, d) => sum + (d.contactInfections || 0), 0) : 0
   const totalAirborneInfections = isMeaslesMode ? chartData.reduce((sum, d) => sum + (d.airborneInfections || 0), 0) : 0
+  const totalDeaths = Math.max(...chartData.map(d => d.dead || 0))
 
   return (
     <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2">
       {isMeaslesMode ? (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             <div className="bg-gradient-to-br from-orange-500/20 to-orange-500/5 border border-orange-500/30 rounded-lg p-3">
               <div className="text-xs text-orange-400 mb-1 font-semibold">Peak Air Quality Index</div>
               <div className="text-xl font-bold text-white">{peakAqi.toFixed(1)}</div>
@@ -127,6 +132,11 @@ function Statistics({ simulationData, currentStep, totalNodes, isMeaslesMode = f
                   ? ((totalAirborneInfections / (totalContactInfections + totalAirborneInfections)) * 100).toFixed(0) 
                   : 0}%
               </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-slate-500/20 to-slate-500/5 border border-slate-500/30 rounded-lg p-3">
+              <div className="text-xs text-slate-400 mb-1 font-semibold">Total Deaths</div>
+              <div className="text-xl font-bold text-white">{totalDeaths}</div>
             </div>
           </div>
 
@@ -261,6 +271,10 @@ function Statistics({ simulationData, currentStep, totalNodes, isMeaslesMode = f
                 <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
                 <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
               </linearGradient>
+              <linearGradient id="colorDead" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#4b5563" stopOpacity={0.8}/>
+                <stop offset="95%" stopColor="#4b5563" stopOpacity={0}/>
+              </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
             <XAxis dataKey="step" stroke="#94a3b8" style={{ fontSize: '12px' }} />
@@ -302,6 +316,15 @@ function Statistics({ simulationData, currentStep, totalNodes, isMeaslesMode = f
               fillOpacity={1}
               fill="url(#colorRecovered)"
               name="Recovered"
+            />
+            <Area
+              type="monotone"
+              dataKey="dead"
+              stackId="1"
+              stroke="#4b5563"
+              fillOpacity={1}
+              fill="url(#colorDead)"
+              name="Dead"
             />
           </AreaChart>
         </ResponsiveContainer>

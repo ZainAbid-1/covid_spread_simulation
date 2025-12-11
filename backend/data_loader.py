@@ -30,12 +30,14 @@ def compute_graph_layout(G):
     print(f"🏝️ Found {num_communities} districts (communities)")
     
     community_centers = {}
-    radius = 2500
+    grid_side = math.ceil(math.sqrt(num_communities))
+    spacing = 400
     
     for i, comm_id in enumerate(set(communities.values())):
-        angle = 2 * math.pi * i / num_communities
-        center_x = radius * math.cos(angle)
-        center_y = radius * math.sin(angle)
+        row = i // grid_side
+        col = i % grid_side
+        center_x = col * spacing + py_random.uniform(-500, 500)
+        center_y = row * spacing + py_random.uniform(-500, 500)
         community_centers[comm_id] = (center_x, center_y)
     
     initial_pos = {}

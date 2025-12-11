@@ -132,9 +132,10 @@ async def websocket_simulate_measles(websocket: WebSocket):
         ventilation_rate = float(params.get("ventilation_rate", 0.05))
         shedding_rate = float(params.get("shedding_rate", 10.0))
         beta_air = float(params.get("beta_air", 0.0001))
+        mortality_rate = float(params.get("mortality_rate", 0.0))
         
         print(f"🦠 Starting Measles Simulation: β={beta}, recovery={gamma_days} days, "
-              f"incubation={incubation_days} days, ventilation={ventilation_rate}")
+              f"incubation={incubation_days} days, ventilation={ventilation_rate}, mortality={mortality_rate}")
         
         for step in measles_model.run_measles_simulation_generator(
             data_loader.contacts_df,
@@ -145,7 +146,8 @@ async def websocket_simulate_measles(websocket: WebSocket):
             incubation_days=incubation_days,
             ventilation_rate=ventilation_rate,
             shedding_rate=shedding_rate,
-            beta_air=beta_air
+            beta_air=beta_air,
+            mortality_rate=mortality_rate
         ):
             await websocket.send_json(step)
         

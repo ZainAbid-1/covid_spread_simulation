@@ -34,7 +34,8 @@ function App() {
     start_nodes: 5,
     ventilation_rate: 0.05,
     shedding_rate: 10.0,
-    beta_air: 0.0001
+    beta_air: 0.0001,
+    mortality_rate: 0.0
   })
 
   const [liveVentilation, setLiveVentilation] = useState(0.05)
@@ -114,6 +115,12 @@ function App() {
       step.new_recovered.forEach(id => { 
         const normalizedId = typeof id === 'string' ? parseInt(id, 10) : id
         nodeStatesRef.current[normalizedId] = 'recovered' 
+      })
+    }
+    if (step.new_dead) {
+      step.new_dead.forEach(id => { 
+        const normalizedId = typeof id === 'string' ? parseInt(id, 10) : id
+        nodeStatesRef.current[normalizedId] = 'dead' 
       })
     }
     if (step.zone_updates) {
@@ -295,7 +302,8 @@ function App() {
         susceptible: 0,
         exposed: 0,
         infected: 0,
-        recovered: 0
+        recovered: 0,
+        dead: 0
       }
     }
     
@@ -303,12 +311,14 @@ function App() {
     const infected = Object.values(nodeStatesRef.current).filter(s => s === 'infected').length
     const exposed = Object.values(nodeStatesRef.current).filter(s => s === 'exposed').length
     const recovered = Object.values(nodeStatesRef.current).filter(s => s === 'recovered').length
+    const dead = Object.values(nodeStatesRef.current).filter(s => s === 'dead').length
     
     return {
-      susceptible: Math.max(0, total - infected - exposed - recovered),
+      susceptible: Math.max(0, total - infected - exposed - recovered - dead),
       exposed,
       infected,
-      recovered
+      recovered,
+      dead
     }
   }, [graphData, currentStep]) // Depend on currentStep to force refresh
 

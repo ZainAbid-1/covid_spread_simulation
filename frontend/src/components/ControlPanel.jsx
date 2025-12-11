@@ -183,6 +183,29 @@ function ControlPanel({ params, setParams, onRunSimulation, loading, isMeaslesMo
                 Infection probability per unit of airborne viral load
               </p>
             </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2 text-slate-300">
+                Mortality Rate
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="0.1"
+                step="0.001"
+                value={params.mortality_rate}
+                onChange={(e) => handleChange('mortality_rate', e.target.value)}
+                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-red-500"
+              />
+              <div className="flex justify-between text-xs text-slate-400 mt-1">
+                <span>0%</span>
+                <span className="font-bold text-red-400">{(params.mortality_rate * 100).toFixed(1)}%</span>
+                <span>10%</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                Probability of death when recovering from infection
+              </p>
+            </div>
           </>
         )}
 

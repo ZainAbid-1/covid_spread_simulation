@@ -110,6 +110,8 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, simulationData, curre
         return '#ef4444'
       case 'recovered':
         return '#3b82f6'
+      case 'dead':
+        return '#4b5563'
       case 'susceptible':
       default:
         return '#10b981'
@@ -168,6 +170,21 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, simulationData, curre
     }
     document.addEventListener('fullscreenchange', handleFullscreenChange)
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const wheelHandler = (e) => {
+      e.preventDefault()
+    }
+
+    container.addEventListener('wheel', wheelHandler, { passive: false })
+    
+    return () => {
+      container.removeEventListener('wheel', wheelHandler)
+    }
   }, [])
 
   useEffect(() => {
@@ -354,7 +371,7 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, simulationData, curre
   }, [isMeaslesMode])
 
   return (
-    <div ref={containerRef} id="graph-container" className="relative w-full h-full rounded-lg overflow-hidden" style={{ minHeight: '600px', backgroundColor: '#020617' }}>
+    <div ref={containerRef} id="graph-container" className="relative w-full h-full rounded-lg overflow-hidden" style={{ minHeight: '600px', backgroundColor: '#020617', touchAction: 'none' }}>
       <ForceGraph2D
         ref={graphRef}
         graphData={graphDataWith2D}
@@ -440,6 +457,10 @@ function NetworkGraphOptimized({ graphData, nodeStatesRef, simulationData, curre
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#3b82f6' }}></div>
             <span className="text-slate-300">Recovered</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#4b5563' }}></div>
+            <span className="text-slate-300">Deceased</span>
           </div>
           {isMeaslesMode && (
             <>
